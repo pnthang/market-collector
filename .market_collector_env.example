@@ -1,0 +1,13 @@
+# Example env file for `scripts/setup_ubuntu.sh` and local setup.
+# Copy this to one of the supported locations and fill in real values:
+#  - scripts/.market_collector_env (script directory)
+#  - ./ (current working directory)
+#  - $HOME/.market_collector_env
+#
+# IMPORTANT: Do NOT commit real secrets. Keep this file as an example only.
+
+GITHUB_PAT=ghp_xxx
+DB_CONN='postgresql+psycopg2://user:pass@host:5432/db'
+
+# Example usage (after copying and editing):
+#   ./scripts/setup_ubuntu.sh
