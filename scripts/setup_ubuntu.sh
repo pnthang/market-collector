@@ -24,6 +24,7 @@ REPO=pnthang/market-collector
 DEFAULT_BRANCH=main
 IMAGE_NAME=market-collector:latest
 CONTAINER_NAME=market-collector
+HOST_PORT=${HOST_PORT:-8282}
 
 print_usage() {
   cat <<EOF
@@ -143,11 +144,12 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
   docker rm -f "$CONTAINER_NAME" || true
 fi
 
-echo "Running container $CONTAINER_NAME"
+echo "Running container $CONTAINER_NAME (host port ${HOST_PORT} -> container 8080)"
 docker run -d \
   --name "$CONTAINER_NAME" \
   --restart unless-stopped \
   -e DATABASE_URL="$DB_CONN" \
+  -p ${HOST_PORT}:8080 \
   "$IMAGE_NAME"
 
 echo "Setup complete. Container started:"

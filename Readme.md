@@ -82,7 +82,7 @@ The health endpoint will be available at `http://localhost:8080/health`.
 - Or build and run manually:
 
   docker build -t market-collector:latest .
-  docker run -d --name market-collector -e DATABASE_URL="postgresql+psycopg2://user:pass@host:5432/market" -p 8080:8080 market-collector:latest
+  docker run -d --name market-collector -e DATABASE_URL="postgresql+psycopg2://user:pass@host:5432/market" -p 8282:8080 market-collector:latest
 
 ## Fetching Index Groups (VN30, VNALL)
 
