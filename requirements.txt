@@ -4,3 +4,4 @@ SQLAlchemy
 apscheduler
 pytz
 python-dotenv
+pytest

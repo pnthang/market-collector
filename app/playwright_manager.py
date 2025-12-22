@@ -19,9 +19,14 @@ class BrowserManager:
         if not self._browser:
             self.start()
         context = self._browser.new_context()
-        if self.disable_images:
-            context.set_default_navigation_timeout(30_000)
         page = context.new_page()
+        if self.disable_images:
+            # block images, fonts and media for performance
+            try:
+                page.route("**/*", lambda route, request: route.abort() if request.resource_type in ("image", "font", "media") else route.continue_())
+            except Exception:
+                # older playwright versions may differ; ignore route failures
+                LOG.debug("Could not set resource blocking route")
         return page
 
     def stop(self):

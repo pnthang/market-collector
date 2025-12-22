@@ -1,0 +1,31 @@
+version: '3.8'
+services:
+  scraper:
+    build: .
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@postgres:5432/market
+      - MARKET_TZ=Asia/Ho_Chi_Minh
+    depends_on:
+      - postgres
+    shm_size: '1gb'
+    networks:
+      - market-net
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=market
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - market-net
+
+volumes:
+  pgdata:
+
+networks:
+  market-net:
+    driver: bridge
