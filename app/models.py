@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstrain
 from .db import Base
 
 
-class Index(Base):
+class IndexModel(Base):
     __tablename__ = "indexes"
     id = Column(Integer, primary_key=True)
     code = Column(String(64), unique=True, nullable=False)
