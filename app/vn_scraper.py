@@ -111,6 +111,8 @@ class VNScraper:
 
         # schedule snapshot job
         self.scheduler.add_job(self._take_snapshot, 'interval', seconds=SNAPSHOT_INTERVAL, id='snapshot')
+        # schedule analysis/news job every 2 hours
+        self.scheduler.add_job(self._scrape_analysis_news, 'interval', hours=2, id='analysis_news')
         self.scheduler.add_listener(lambda ev: LOG.exception("Job error: %s", ev.exception) if ev.code == EVENT_JOB_ERROR else None)
         self.scheduler.start()
 
@@ -120,6 +122,19 @@ class VNScraper:
         except Exception:
             LOG.debug("Scheduler shutdown failed")
         self.browser.stop()
+
+    def _scrape_analysis_news(self):
+        """Stub job for scraping analysis and news every 2 hours.
+
+        This is intentionally minimal — it should be expanded to navigate to
+        analysis/news pages for discovered symbols, extract articles, and write
+        to `index_analysis` / `index_news` tables. For now it logs and clears
+        the cache periodically to avoid unbounded growth.
+        """
+        LOG.info("Running analysis/news job — found %d symbols", len(self.cache))
+        # TODO: implement detailed scraping of analysis/news pages
+        # conservative maintenance: trim cache keys not updated recently (not implemented)
+        return
 
 
 def run():
