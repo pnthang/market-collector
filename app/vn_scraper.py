@@ -6,10 +6,12 @@ from typing import Dict, Any
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR
 from sqlalchemy.exc import IntegrityError
+import threading
+import signal
 
 from .playwright_manager import BrowserManager
 from .db import SessionLocal, init_db
-from .models import IndexPrice
+from .models import IndexPrice, IndexMetadata
 from .config import SNAPSHOT_INTERVAL, MARKET_TZ, DRY_RUN
 from .utils import is_market_open_at
 
@@ -178,8 +180,6 @@ class VNScraper:
 
 
 def run():
-    import signal
-
     scraper = VNScraper()
     scraper.start()
 
@@ -187,13 +187,17 @@ def run():
         LOG.info("Signal %s received, shutting down", signum)
         scraper.stop()
 
-    signal.signal(signal.SIGINT, _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
+    # Only install signal handlers if running in the main thread
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, _shutdown)
+        signal.signal(signal.SIGTERM, _shutdown)
+    else:
+        LOG.debug("Not installing signal handlers (not main thread)")
 
-    # keep running until stopped
+    # wait indefinitely until interrupted
+    stop_event = threading.Event()
     try:
-        while True:
-            pass
+        stop_event.wait()
     except KeyboardInterrupt:
         scraper.stop()
 
