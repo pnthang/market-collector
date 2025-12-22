@@ -3,8 +3,17 @@ set -euo pipefail
 
 # setup_ubuntu.sh
 # Usage:
-#   GITHUB_PAT=ghp_xxx DB_CONN="postgresql+psycopg2://user:pass@host:5432/db" \
-#     ./scripts/setup_ubuntu.sh [--branch main] [--image market-collector:latest] [--container market-collector]
+#   - Preferred (avoid shell history expansion when secrets contain '!'):
+#       Create a file at "$HOME/.market_collector_env" with the following contents:
+#         GITHUB_PAT=ghp_xxx
+#         DB_CONN='postgresql+psycopg2://user:pass@host:5432/db'
+#       Then run:
+#         ./scripts/setup_ubuntu.sh
+#
+#   - Alternatively, export env vars before running (beware of interactive history expansion):
+#       export GITHUB_PAT=ghp_xxx
+#       export DB_CONN='postgresql+psycopg2://user:pass@host:5432/db'
+#       ./scripts/setup_ubuntu.sh [--branch main] [--image market-collector:latest] [--container market-collector]
 #
 # This script will:
 #  - clone the repository `pnthang/market-collector` from GitHub using a PAT
@@ -61,6 +70,26 @@ if [[ -z "${DB_CONN:-}" ]]; then
 fi
 
 WORKDIR="/opt/market-collector"
+
+# Allow providing secrets via a per-user env file to avoid typing secrets with shell history
+# expansion (e.g. '!' causing "event not found"). If present, source it.
+ENV_FILE="$HOME/.market_collector_env"
+if [[ -f "${ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+fi
+
+# If variables still not set, prompt interactively (GITHUB_PAT hidden)
+if [[ -z "${GITHUB_PAT:-}" ]]; then
+  echo "GITHUB_PAT not set. You can set it in ${ENV_FILE} to avoid interactive prompts."
+  read -s -p "Enter GITHUB_PAT (input hidden): " GITHUB_PAT
+  echo
+fi
+
+if [[ -z "${DB_CONN:-}" ]]; then
+  echo "DB_CONN not set. You can set it in ${ENV_FILE} to avoid interactive prompts."
+  read -p "Enter DB_CONN (e.g. postgresql+psycopg2://user:pass@host:5432/db): " DB_CONN
+fi
 
 echo "Starting setup: repo=${REPO} branch=${BRANCH} image=${IMAGE_NAME} container=${CONTAINER_NAME}"
 
