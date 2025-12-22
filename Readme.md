@@ -49,13 +49,74 @@ A backend data collector for the Market Analyze project. This service gathers Ya
 ## Reliability & Scaling
 
 - **Docker:** Ensures consistent environments and easy scaling.
-- **Scheduling:** Uses cron or similar tools for reliable, repeatable scraping.
+- **Scheduling:** Uses APScheduler for job scheduling and graceful shutdown.
+- **Health checks:** HTTP `/health` and `/ready` endpoints are provided (port 8080) to verify DB connectivity.
 - **Compliance:** Designed to respect data source terms of service.
 
-## Future Enhancements
+## Quickstart — Local (Python)
 
-- **Grafana Dashboards:** For real-time data visualization.
-- **Kafka Integration:** For streaming data to downstream analytics.
+- Create a virtualenv and install dependencies:
 
+  pip install -r requirements.txt
 
-Let us know if you want to contribute or need more technical details!
+- Provide DB connection via `.env` or environment variables (see `.env.example`). Example using Postgres:
+
+  export DB_USER=postgres
+  export DB_PASSWORD=postgres
+  export DB_HOST=localhost
+  export DB_PORT=5432
+  export DB_NAME=market
+
+- Run the service (starts scraper + health server):
+
+  python -m app
+
+The health endpoint will be available at `http://localhost:8080/health`.
+
+## Quickstart — Docker
+
+- Build and run with Docker Compose (includes Postgres service):
+
+  docker compose up --build
+
+- Or build and run manually:
+
+  docker build -t market-collector:latest .
+  docker run -d --name market-collector -e DATABASE_URL="postgresql+psycopg2://user:pass@host:5432/market" -p 8080:8080 market-collector:latest
+
+## Fetching Index Groups (VN30, VNALL)
+
+- HTTP-first fetch (falls back to Playwright if blocked):
+
+  python -m app.fetch_group_auto VN30
+
+- Fetch multiple groups (defaults to `VN30` and `VNALL`):
+
+  python -m app.fetch_groups
+
+## Systemd (host) — run container as a service
+
+- Install the provided systemd unit (must run as root):
+
+  sudo ./scripts/install_systemd.sh
+  sudo systemctl start market-collector.service
+  sudo systemctl status market-collector.service
+
+The unit expects a container named `market-collector` (the `scripts/setup_ubuntu.sh` creates and runs this container).
+
+## Files of interest
+
+- `app/` — main application package (`vn_scraper.py`, `playwright_manager.py`, DB models, health endpoint)
+- `app/fetch_group_playwright.py` — Playwright-backed group fetcher
+- `app/fetch_group_auto.py` — HTTP-first fetch with Playwright fallback
+- `Dockerfile`, `docker-compose.yml` — containerization
+- `scripts/setup_ubuntu.sh` — helper to clone, build, and run using PAT
+- `systemd/market-collector.service` — example systemd unit
+
+## Notes & Next Steps
+
+- Health checks currently validate DB connectivity. I can extend `/ready` to include scheduler/browser readiness.
+- For production, use a secure credential method instead of embedding PATs in clone URLs. Use secrets/credential helpers.
+- If you want CI (run tests on push) or Prometheus metrics, I can add them.
+
+Let me know which feature you want next.
