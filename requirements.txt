@@ -5,3 +5,4 @@ apscheduler
 pytz
 python-dotenv
 pytest
+requests
