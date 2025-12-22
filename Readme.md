@@ -142,3 +142,27 @@ The unit expects a container named `market-collector` (the `scripts/setup_ubuntu
   ```
 
   The repository ignores `.market_collector_env` to prevent accidental commits.
+
+**Control API**
+
+The service exposes simple HTTP control endpoints (on host port 8282 by default) to start/stop scrapers and change their intervals.
+
+- **Start VN scraper:** `POST /control/vn/start`
+- **Stop VN scraper:** `POST /control/vn/stop`
+- **Set VN snapshot interval:** `POST /control/vn/interval` with JSON body `{"seconds": 15}`
+
+- **Start Yahoo scheduler:** `POST /control/yahoo/start`
+- **Stop Yahoo scheduler:** `POST /control/yahoo/stop`
+- **Set Yahoo interval:** `POST /control/yahoo/interval` with JSON body `{"hours": 2}`
+
+Examples (default port 8282):
+
+```bash
+curl -X POST http://localhost:8282/control/vn/start
+curl -X POST http://localhost:8282/control/vn/interval -H "Content-Type: application/json" -d '{"seconds":15}'
+curl -X POST http://localhost:8282/control/yahoo/interval -H "Content-Type: application/json" -d '{"hours":2}'
+```
+
+Notes:
+- Data inserts deduplicate on `(index_code, timestamp)` so only new samples are stored.
+- VN snapshots run by default every 15s and Yahoo fetches every 2 hours; use the API above to change them at runtime.
