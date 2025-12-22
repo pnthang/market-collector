@@ -41,9 +41,10 @@ def save_group(group: str, payload: Dict[str, Any]):
     name = meta.get("name") or group
     description = meta.get("description") or None
 
-    im = session.query(IndexMetadata).filter_by(code=group).one_or_none()
+    prefixed_group = f"VN:{group}"
+    im = session.query(IndexMetadata).filter_by(code=prefixed_group).one_or_none()
     if not im:
-        im = IndexMetadata(code=group, name=name, description=description, source="iboard-query")
+        im = IndexMetadata(code=prefixed_group, name=name, description=description, source="iboard-query")
         session.add(im)
         try:
             session.commit()
@@ -68,7 +69,7 @@ def save_group(group: str, payload: Dict[str, Any]):
             continue
 
         cons = IndexConstituent(
-            index_code=group,
+            index_code=prefixed_group,
             symbol=symbol,
             name=name,
             weight=float(weight) if weight is not None else None,

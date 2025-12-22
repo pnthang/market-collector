@@ -122,11 +122,12 @@ def save_quotes(quotes: List[Dict]):
     objs = []
     for q in quotes:
         symbol = q['symbol']
-        # upsert metadata simple
-        if session.query(IndexMetadata).filter_by(code=symbol).one_or_none() is None:
-            session.add(IndexMetadata(code=symbol, name=symbol, source='yahoo'))
+        prefixed = f"US:{symbol}"
+        # upsert metadata simple using prefixed code
+        if session.query(IndexMetadata).filter_by(code=prefixed).one_or_none() is None:
+            session.add(IndexMetadata(code=prefixed, name=symbol, source='yahoo'))
             session.commit()
-        objs.append(IndexPrice(index_code=symbol, source='yahoo', price=q['price'], change=q['change'], change_percent=q['percent'], timestamp=q['timestamp']))
+        objs.append(IndexPrice(index_code=prefixed, source='yahoo', price=q['price'], change=q['change'], change_percent=q['percent'], timestamp=q['timestamp']))
     try:
         session.bulk_save_objects(objs)
         session.commit()
@@ -145,18 +146,19 @@ def save_quotes(quotes: List[Dict]):
 def save_news_analysis(symbol: str, payload: Dict[str, List[Dict]]):
     session = SessionLocal()
     try:
+        prefixed = f"US:{symbol}"
         for n in payload.get('news', []):
             if not n.get('url'):
                 continue
             if session.query(IndexNews).filter_by(url=n['url']).one_or_none():
                 continue
-            session.add(IndexNews(index_code=symbol, headline=n.get('headline'), url=n.get('url')))
+            session.add(IndexNews(index_code=prefixed, headline=n.get('headline'), url=n.get('url')))
         for a in payload.get('analysis', []):
             if not a.get('url'):
                 continue
             if session.query(IndexAnalysis).filter_by(url=a['url']).one_or_none():
                 continue
-            session.add(IndexAnalysis(index_code=symbol, title=a.get('title'), url=a.get('url')))
+            session.add(IndexAnalysis(index_code=prefixed, title=a.get('title'), url=a.get('url')))
         session.commit()
     except Exception:
         session.rollback()

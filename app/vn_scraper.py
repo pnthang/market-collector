@@ -90,16 +90,17 @@ class VNScraper:
         rows = []
         metadata_to_upsert = []
         for code, entry in list(self.cache.items()):
+            prefixed = f"VN:{code}"
             rows.append({
-                "index_code": code,
+                "index_code": prefixed,
                 "source": "vnboard",
                 "price": entry["price"],
                 "change": entry.get("change"),
                 "change_percent": entry.get("change_percent"),
                 "timestamp": now,
             })
-            # prepare metadata upsert
-            metadata_to_upsert.append({"code": code, "name": code, "source": "vnboard"})
+            # prepare metadata upsert (store prefixed code)
+            metadata_to_upsert.append({"code": prefixed, "name": code, "source": "vnboard"})
 
         if DRY_RUN:
             for r in rows:
