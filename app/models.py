@@ -51,3 +51,25 @@ class IndexConstituent(Base):
     __table_args__ = (
         Index("ix_constituent_index_symbol", "index_code", "symbol"),
     )
+
+
+class IndexAnalysis(Base):
+    __tablename__ = "index_analysis"
+    id = Column(Integer, primary_key=True)
+    index_code = Column(String(64), nullable=False, index=True)
+    title = Column(String(1024))
+    summary = Column(String(2048))
+    source = Column(String(255))
+    url = Column(String(1024), unique=True)
+    published_at = Column(DateTime(timezone=True))
+
+
+class IndexNews(Base):
+    __tablename__ = "index_news"
+    id = Column(Integer, primary_key=True)
+    index_code = Column(String(64), nullable=False, index=True)
+    headline = Column(String(1024))
+    summary = Column(String(2048))
+    publisher = Column(String(255))
+    url = Column(String(1024), unique=True)
+    published_at = Column(DateTime(timezone=True))

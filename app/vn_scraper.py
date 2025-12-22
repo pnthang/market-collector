@@ -86,21 +86,55 @@ class VNScraper:
         if not is_market_open_at(now, MARKET_TZ):
             LOG.debug("Market closed — skipping snapshot")
             return
-        session = SessionLocal()
+
+        rows = []
+        metadata_to_upsert = []
         for code, entry in list(self.cache.items()):
-            ts = now
-            ip = IndexPrice(index_code=code, source="vnboard", price=entry["price"], change=entry.get("change"), change_percent=entry.get("change_percent"), timestamp=ts)
-            if DRY_RUN:
-                LOG.info("Dry-run insert: %s %s", code, entry["price"])
-                continue
-            session.add(ip)
-            try:
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-            except Exception:
-                LOG.exception("DB error")
-        session.close()
+            rows.append({
+                "index_code": code,
+                "source": "vnboard",
+                "price": entry["price"],
+                "change": entry.get("change"),
+                "change_percent": entry.get("change_percent"),
+                "timestamp": now,
+            })
+            # prepare metadata upsert
+            metadata_to_upsert.append({"code": code, "name": code, "source": "vnboard"})
+
+        if DRY_RUN:
+            for r in rows:
+                LOG.info("Dry-run insert: %s %s", r["index_code"], r["price"])
+            return
+
+        session = SessionLocal()
+        try:
+            # upsert metadata (simple check-then-insert to remain DB-agnostic)
+            for md in metadata_to_upsert:
+                exists = session.query(IndexMetadata).filter_by(code=md["code"]).one_or_none()
+                if not exists:
+                    session.add(IndexMetadata(code=md["code"], name=md.get("name"), source=md.get("source")))
+            session.commit()
+
+            # batch insert price rows
+            objs = [IndexPrice(**r) for r in rows]
+            session.bulk_save_objects(objs)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            LOG.warning("Integrity error during batch insert — falling back to individual inserts")
+            for r in rows:
+                try:
+                    ip = IndexPrice(**r)
+                    session.add(ip)
+                    session.commit()
+                except IntegrityError:
+                    session.rollback()
+                except Exception:
+                    LOG.exception("DB error on single insert")
+        except Exception:
+            LOG.exception("Unexpected DB error during batch insert")
+        finally:
+            session.close()
 
     def start(self):
         init_db()
