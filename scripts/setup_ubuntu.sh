@@ -71,13 +71,23 @@ fi
 
 WORKDIR="/opt/market-collector"
 
-# Allow providing secrets via a per-user env file to avoid typing secrets with shell history
-# expansion (e.g. '!' causing "event not found"). If present, source it.
-ENV_FILE="$HOME/.market_collector_env"
-if [[ -f "${ENV_FILE}" ]]; then
-  # shellcheck disable=SC1090
-  source "${ENV_FILE}"
-fi
+# Allow providing secrets via an env file to avoid typing secrets with shell history
+# expansion (e.g. '!' causing "event not found"). The script will look for
+# `.market_collector_env` in the following order and source the first match:
+#  1. Same directory as this script
+#  2. Current working directory
+#  3. User's home directory (`$HOME`)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_CANDIDATES=("${SCRIPT_DIR}/.market_collector_env" "$(pwd)/.market_collector_env" "$HOME/.market_collector_env")
+ENV_FILE=""
+for f in "${ENV_CANDIDATES[@]}"; do
+  if [[ -f "${f}" ]]; then
+    ENV_FILE="${f}"
+    # shellcheck disable=SC1090
+    source "${ENV_FILE}"
+    break
+  fi
+done
 
 # If variables still not set, prompt interactively (GITHUB_PAT hidden)
 if [[ -z "${GITHUB_PAT:-}" ]]; then
