@@ -107,6 +107,8 @@ class VNScraper:
             # prepare metadata upsert (store prefixed code)
             metadata_to_upsert.append({"code": prefixed, "name": code, "source": "vnboard"})
 
+        LOG.info("Snapshot: cache=%d prepared_rows=%d", len(self.cache), len(rows))
+
         if DRY_RUN:
             for r in rows:
                 LOG.info("Dry-run insert: %s %s", r["index_code"], r["price"])
@@ -125,6 +127,7 @@ class VNScraper:
             objs = [IndexPrice(**r) for r in rows]
             session.bulk_save_objects(objs)
             session.commit()
+            LOG.info("Inserted %d price rows", len(rows))
         except IntegrityError:
             session.rollback()
             LOG.warning("Integrity error during batch insert — falling back to individual inserts")
