@@ -15,6 +15,10 @@ from .playwright_manager import BrowserManager
 from .db import SessionLocal, init_db
 from .models import IndexMetadata, IndexPrice, IndexNews, IndexAnalysis
 from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.events import EVENT_JOB_ERROR
+
+_YAHOO_SCHEDULER = None
 
 LOG = logging.getLogger("yahoo_scraper")
 
@@ -135,20 +139,81 @@ def save_quotes(quotes: List[Dict]):
         if session.query(IndexMetadata).filter_by(code=prefixed).one_or_none() is None:
             session.add(IndexMetadata(code=prefixed, name=symbol, source='yahoo'))
             session.commit()
-        objs.append(IndexPrice(index_code=prefixed, source='yahoo', price=q['price'], change=q['change'], change_percent=q['percent'], timestamp=q['timestamp']))
+        objs.append({
+            'index_code': prefixed,
+            'source': 'yahoo',
+            'price': q['price'],
+            'change': q['change'],
+            'change_percent': q['percent'],
+            'timestamp': q['timestamp'],
+        })
     try:
-        session.bulk_save_objects(objs)
+        # dedupe before insert
+        codes = list({o['index_code'] for o in objs})
+        timestamps = list({o['timestamp'] for o in objs})
+        existing = set()
+        if codes and timestamps:
+            qres = session.query(IndexPrice.index_code, IndexPrice.timestamp).filter(IndexPrice.index_code.in_(codes), IndexPrice.timestamp.in_(timestamps)).all()
+            existing = {(c, t) for c, t in qres}
+        new_objs = [IndexPrice(**o) for o in objs if (o['index_code'], o['timestamp']) not in existing]
+        if not new_objs:
+            return
+        session.bulk_save_objects(new_objs)
         session.commit()
     except Exception:
         session.rollback()
         for o in objs:
             try:
-                session.add(o)
+                ip = IndexPrice(index_code=o['index_code'], source=o['source'], price=o['price'], change=o['change'], change_percent=o['change_percent'], timestamp=o['timestamp'])
+                session.add(ip)
                 session.commit()
             except Exception:
                 session.rollback()
     finally:
         session.close()
+
+
+def _yahoo_job(limit: Optional[int] = None):
+    try:
+        run_one_cycle(limit=limit)
+    except Exception:
+        LOG.exception("Yahoo scheduled job failed")
+
+
+def start_scheduler(hours: int = 2, limit: Optional[int] = None):
+    global _YAHOO_SCHEDULER
+    if _YAHOO_SCHEDULER is None:
+        _YAHOO_SCHEDULER = BackgroundScheduler(timezone='UTC')
+        _YAHOO_SCHEDULER.add_job(lambda: _yahoo_job(limit), 'interval', hours=hours, id='yahoo_fetch')
+        _YAHOO_SCHEDULER.add_listener(lambda ev: LOG.exception("Job error: %s", ev.exception) if ev.code == EVENT_JOB_ERROR else None)
+        _YAHOO_SCHEDULER.start()
+    return _YAHOO_SCHEDULER
+
+
+def stop_scheduler():
+    global _YAHOO_SCHEDULER
+    if _YAHOO_SCHEDULER is not None:
+        try:
+            _YAHOO_SCHEDULER.shutdown(wait=False)
+        except Exception:
+            LOG.debug("Yahoo scheduler shutdown failed")
+        _YAHOO_SCHEDULER = None
+
+
+def set_scheduler_interval(hours: int):
+    global _YAHOO_SCHEDULER
+    if _YAHOO_SCHEDULER is None:
+        return False
+    try:
+        try:
+            _YAHOO_SCHEDULER.remove_job('yahoo_fetch')
+        except Exception:
+            pass
+        _YAHOO_SCHEDULER.add_job(lambda: _yahoo_job(), 'interval', hours=hours, id='yahoo_fetch')
+        return True
+    except Exception:
+        LOG.exception("Failed to set yahoo scheduler interval")
+        return False
 
 
 def save_news_analysis(symbol: str, payload: Dict[str, List[Dict]]):
