@@ -62,6 +62,9 @@ def _parse_payload(payload: str):
     return found
 
 
+SCRAPER_READY = False
+
+
 class VNScraper:
     def __init__(self):
         self.browser = BrowserManager()
@@ -150,6 +153,8 @@ class VNScraper:
         self.scheduler.add_job(self._scrape_analysis_news, 'interval', hours=2, id='analysis_news')
         self.scheduler.add_listener(lambda ev: LOG.exception("Job error: %s", ev.exception) if ev.code == EVENT_JOB_ERROR else None)
         self.scheduler.start()
+        global SCRAPER_READY
+        SCRAPER_READY = True
 
     def stop(self):
         try:

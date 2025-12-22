@@ -4,6 +4,7 @@ from sqlalchemy import text
 import logging
 
 from .db import engine
+from . import vn_scraper
 
 LOG = logging.getLogger("health")
 
@@ -30,8 +31,12 @@ def health():
 
 @app.get("/ready")
 def ready():
-    # same as /health for now; can include scheduler/playwright checks
-    return health()
+    db_ok = check_db()
+    # check scraper readiness flag
+    scraper_ready = getattr(vn_scraper, "SCRAPER_READY", False)
+    ok = db_ok and scraper_ready
+    code = 200 if ok else 500
+    return JSONResponse(status_code=code, content={"status": "ok" if ok else "fail", "db": db_ok, "scraper_ready": scraper_ready})
 
 
 def run(host: str = "0.0.0.0", port: int = 8080):

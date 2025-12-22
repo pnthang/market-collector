@@ -13,6 +13,8 @@ import logging
 from typing import Any, Dict
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from sqlalchemy.exc import IntegrityError
 
 from .db import init_db, SessionLocal
@@ -29,7 +31,11 @@ def fetch_group(group: str) -> Dict[str, Any]:
         "Referer": "https://iboard.ssi.com.vn/",
         "Origin": "https://iboard.ssi.com.vn",
     }
-    resp = requests.get(url, headers=headers, timeout=10)
+    # use a session with retries
+    session = requests.Session()
+    retries = Retry(total=3, backoff_factor=0.5, status_forcelist=(429, 500, 502, 503, 504))
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    resp = session.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
     return resp.json()
 

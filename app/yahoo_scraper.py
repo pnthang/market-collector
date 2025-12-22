@@ -7,6 +7,8 @@ from typing import List, Dict, Optional
 import logging
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 
 from .playwright_manager import BrowserManager
@@ -23,7 +25,10 @@ YAHOO_QUOTE_API = "https://query1.finance.yahoo.com/v7/finance/quote"
 
 def discover_indices(limit: Optional[int] = None) -> List[str]:
     """Scrape the world indices page and return a list of symbols (e.g., ^GSPC, ^DJI)."""
-    resp = requests.get(YAHOO_WORLD_INDICES, timeout=15)
+    session = requests.Session()
+    retries = Retry(total=3, backoff_factor=0.5, status_forcelist=(429, 500, 502, 503, 504))
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    resp = session.get(YAHOO_WORLD_INDICES, timeout=15)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
     symbols = []
@@ -48,7 +53,10 @@ def fetch_quotes(symbols: List[str]) -> List[Dict]:
     if not symbols:
         return []
     params = {"symbols": ",".join(symbols)}
-    resp = requests.get(YAHOO_QUOTE_API, params=params, timeout=10)
+    session = requests.Session()
+    retries = Retry(total=3, backoff_factor=0.3, status_forcelist=(429, 500, 502, 503, 504))
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    resp = session.get(YAHOO_QUOTE_API, params=params, timeout=10)
     resp.raise_for_status()
     data = resp.json()
     results = []
