@@ -65,6 +65,7 @@ def _parse_payload(payload: str):
 
 
 SCRAPER_READY = False
+SCRAPER_INSTANCE = None
 
 
 class VNScraper:
@@ -123,11 +124,22 @@ class VNScraper:
                     session.add(IndexMetadata(code=md["code"], name=md.get("name"), source=md.get("source")))
             session.commit()
 
-            # batch insert price rows
-            objs = [IndexPrice(**r) for r in rows]
-            session.bulk_save_objects(objs)
-            session.commit()
-            LOG.info("Inserted %d price rows", len(rows))
+            # Avoid inserting duplicates: check existing (index_code, timestamp) pairs
+            codes = list({r['index_code'] for r in rows})
+            timestamps = list({r['timestamp'] for r in rows})
+            existing = set()
+            if codes and timestamps:
+                q = session.query(IndexPrice.index_code, IndexPrice.timestamp).filter(IndexPrice.index_code.in_(codes), IndexPrice.timestamp.in_(timestamps)).all()
+                existing = {(c, t) for c, t in q}
+
+            new_rows = [r for r in rows if (r['index_code'], r['timestamp']) not in existing]
+            if not new_rows:
+                LOG.info("No new rows to insert after deduplication")
+            else:
+                objs = [IndexPrice(**r) for r in new_rows]
+                session.bulk_save_objects(objs)
+                session.commit()
+                LOG.info("Inserted %d price rows", len(new_rows))
         except IntegrityError:
             session.rollback()
             LOG.warning("Integrity error during batch insert — falling back to individual inserts")
@@ -182,13 +194,44 @@ class VNScraper:
         return
 
 
+def start_scraper():
+    global SCRAPER_INSTANCE
+    if SCRAPER_INSTANCE is None:
+        SCRAPER_INSTANCE = VNScraper()
+        SCRAPER_INSTANCE.start()
+    return SCRAPER_INSTANCE
+
+
+def stop_scraper():
+    global SCRAPER_INSTANCE
+    if SCRAPER_INSTANCE is not None:
+        SCRAPER_INSTANCE.stop()
+        SCRAPER_INSTANCE = None
+
+
+def set_snapshot_interval(seconds: int):
+    """Change the snapshot interval (seconds) at runtime."""
+    global SCRAPER_INSTANCE
+    if SCRAPER_INSTANCE is None:
+        return False
+    try:
+        try:
+            SCRAPER_INSTANCE.scheduler.remove_job('snapshot')
+        except Exception:
+            pass
+        SCRAPER_INSTANCE.scheduler.add_job(SCRAPER_INSTANCE._take_snapshot, 'interval', seconds=seconds, id='snapshot')
+        return True
+    except Exception:
+        LOG.exception("Failed to set snapshot interval")
+        return False
+
+
 def run():
-    scraper = VNScraper()
-    scraper.start()
+    scraper = start_scraper()
 
     def _shutdown(signum, frame):
         LOG.info("Signal %s received, shutting down", signum)
-        scraper.stop()
+        stop_scraper()
 
     # Only install signal handlers if running in the main thread
     if threading.current_thread() is threading.main_thread():
@@ -202,7 +245,7 @@ def run():
     try:
         stop_event.wait()
     except KeyboardInterrupt:
-        scraper.stop()
+        stop_scraper()
 
 
 if __name__ == "__main__":
