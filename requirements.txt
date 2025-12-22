@@ -1,0 +1,6 @@
+playwright
+psycopg2-binary
+SQLAlchemy
+apscheduler
+pytz
+python-dotenv
