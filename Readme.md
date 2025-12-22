@@ -126,3 +126,19 @@ The unit expects a container named `market-collector` (the `scripts/setup_ubuntu
   alembic upgrade head
   ```
   Review generated migrations before applying in production.
+
+- Local secrets: the `scripts/setup_ubuntu.sh` script supports a local secrets file named `.market_collector_env`.
+  Place a file with the following format in one of these locations (script checks in this order):
+
+  - `scripts/.market_collector_env` (next to the script)
+  - `./.market_collector_env` (current directory)
+  - `~/.market_collector_env` (your home directory)
+
+  Example contents (do NOT commit real secrets):
+
+  ```ini
+  GITHUB_PAT=ghp_xxx
+  DB_CONN='postgresql+psycopg2://user:pass@host:5432/db'
+  ```
+
+  The repository ignores `.market_collector_env` to prevent accidental commits.

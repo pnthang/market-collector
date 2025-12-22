@@ -9,3 +9,4 @@ requests
 fastapi
 uvicorn[standard]
 beautifulsoup4
+alembic

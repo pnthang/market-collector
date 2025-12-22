@@ -1,0 +1,12 @@
+# Ignore local secrets file for setup script
+.market_collector_env
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Database (local sqlite if used)
+market_collector.db
+
+# Editor
+.vscode/
