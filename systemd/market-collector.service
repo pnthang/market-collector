@@ -1,0 +1,13 @@
+[Unit]
+Description=Market Collector (Docker container supervisor)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker start market-collector || /usr/bin/docker run -d --name market-collector --restart unless-stopped -e DATABASE_URL=${DATABASE_URL} market-collector:latest
+ExecStop=/usr/bin/docker stop market-collector
+
+[Install]
+WantedBy=multi-user.target

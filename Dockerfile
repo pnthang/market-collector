@@ -14,4 +14,6 @@ RUN pip install --no-cache-dir -r requirements.txt && playwright install chromiu
 
 COPY . /app
 
+EXPOSE 8080
+
 CMD ["python", "-m", "app"]
