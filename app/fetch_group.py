@@ -23,7 +23,13 @@ LOG = logging.getLogger("fetch_group")
 
 def fetch_group(group: str) -> Dict[str, Any]:
     url = f"https://iboard-query.ssi.com.vn/stock/group/{group}"
-    resp = requests.get(url, timeout=10)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://iboard.ssi.com.vn/",
+        "Origin": "https://iboard.ssi.com.vn",
+    }
+    resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
     return resp.json()
 
