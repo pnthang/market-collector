@@ -117,6 +117,12 @@ The unit expects a container named `market-collector` (the `scripts/setup_ubuntu
 
 - Health checks currently validate DB connectivity. I can extend `/ready` to include scheduler/browser readiness.
 - For production, use a secure credential method instead of embedding PATs in clone URLs. Use secrets/credential helpers.
-- If you want CI (run tests on push) or Prometheus metrics, I can add them.
 
-Let me know which feature you want next.
+- Database migrations: Alembic is configured and an initial migration has been added at `alembic/versions/0001_initial.py`.
+  To create/apply migrations locally, ensure `DATABASE_URL` is set and run:
+
+  ```bash
+  pip install -r requirements.txt
+  alembic upgrade head
+  ```
+  Review generated migrations before applying in production.
