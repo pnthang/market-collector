@@ -10,7 +10,7 @@ def main():
     # start scraper in background thread
     t = Thread(target=run_scraper, daemon=True)
     t.start()
-    # start health HTTP server in foreground
+    # start FastAPI/uvicorn health server in foreground
     run_health(host="0.0.0.0", port=8080)
 
 

@@ -1,4 +1,5 @@
-from flask import Flask, jsonify
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import logging
 
@@ -6,7 +7,7 @@ from .db import engine
 
 LOG = logging.getLogger("health")
 
-app = Flask(__name__)
+app = FastAPI(title="market-collector-health")
 
 
 def check_db() -> bool:
@@ -19,19 +20,21 @@ def check_db() -> bool:
         return False
 
 
-@app.route("/health")
+@app.get("/health")
 def health():
     db_ok = check_db()
     status = "ok" if db_ok else "fail"
     code = 200 if db_ok else 500
-    return jsonify({"status": status, "db": db_ok}), code
+    return JSONResponse(status_code=code, content={"status": status, "db": db_ok})
 
 
-@app.route("/ready")
+@app.get("/ready")
 def ready():
     # same as /health for now; can include scheduler/playwright checks
     return health()
 
 
-def run(host="0.0.0.0", port=8080):
-    app.run(host=host, port=port)
+def run(host: str = "0.0.0.0", port: int = 8080):
+    import uvicorn
+
+    uvicorn.run("app.health:app", host=host, port=port, log_level="info")

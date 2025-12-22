@@ -6,4 +6,5 @@ pytz
 python-dotenv
 pytest
 requests
-Flask
+fastapi
+uvicorn[standard]
