@@ -5,6 +5,8 @@ import logging
 
 from .db import engine
 from . import vn_scraper
+from . import yahoo_scraper
+from pydantic import BaseModel
 
 LOG = logging.getLogger("health")
 
@@ -43,3 +45,47 @@ def run(host: str = "0.0.0.0", port: int = 8080):
     import uvicorn
 
     uvicorn.run("app.health:app", host=host, port=port, log_level="info")
+
+
+class IntervalSeconds(BaseModel):
+    seconds: int
+
+
+class IntervalHours(BaseModel):
+    hours: int
+
+
+@app.post('/control/vn/start')
+def control_vn_start():
+    vn_scraper.start_scraper()
+    return {"status": "started"}
+
+
+@app.post('/control/vn/stop')
+def control_vn_stop():
+    vn_scraper.stop_scraper()
+    return {"status": "stopped"}
+
+
+@app.post('/control/vn/interval')
+def control_vn_interval(payload: IntervalSeconds):
+    ok = vn_scraper.set_snapshot_interval(payload.seconds)
+    return {"ok": ok}
+
+
+@app.post('/control/yahoo/start')
+def control_yahoo_start():
+    yahoo_scraper.start_scheduler()
+    return {"status": "started"}
+
+
+@app.post('/control/yahoo/stop')
+def control_yahoo_stop():
+    yahoo_scraper.stop_scheduler()
+    return {"status": "stopped"}
+
+
+@app.post('/control/yahoo/interval')
+def control_yahoo_interval(payload: IntervalHours):
+    ok = yahoo_scraper.set_scheduler_interval(payload.hours)
+    return {"ok": ok}
