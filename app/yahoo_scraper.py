@@ -235,6 +235,113 @@ def save_quotes(quotes: List[Dict]):
         session.close()
 
 
+def to_iso(val) -> Optional[str]:
+    if val is None:
+        return None
+    try:
+        if isinstance(val, (int, float)):
+            return datetime.utcfromtimestamp(int(val)).isoformat()
+        if isinstance(val, datetime):
+            return val.isoformat()
+        # last-resort string
+        return str(val)
+    except Exception:
+        return None
+
+
+def fetch_realtime(symbol: str) -> Dict:
+    """Return a detailed realtime dict for `symbol` using yfinance when available.
+
+    Fields mirror the structure requested in the issue: price, change_percent, name,
+    close (previous close), after_hours, after_hours_time, 52-week high/low, volume, etc.
+    """
+    t = None
+    info = {}
+    fi = None
+    price = None
+    prev_close = None
+    change_percent = None
+
+    if HAVE_YF:
+        try:
+            t = yf.Ticker(symbol)
+            info = t.info or {}
+            fi = getattr(t, 'fast_info', None) or {}
+        except Exception:
+            LOG.exception("yfinance info error for %s", symbol)
+
+    # price candidates
+    price = info.get('regularMarketPrice') or (fi.get('last_price') if fi else None)
+    prev_close = info.get('previousClose') or (fi.get('previous_close') if fi else None)
+    change_percent = info.get('regularMarketChangePercent') or None
+
+    if price is None and t is not None:
+        try:
+            h = t.history(period='1d', interval='1m')
+            if not h.empty:
+                price = float(h['Close'].iloc[-1])
+        except Exception:
+            LOG.debug("yfinance history fallback failed for %s", symbol)
+
+    result = {
+        "symbol": symbol,
+        "price": price,
+        "change_percent": change_percent,
+        "name": info.get("shortName") or info.get("longName"),
+        "close": prev_close,
+        "after_hours": info.get("postMarketPrice") or info.get("postMarketChange") or None,
+        "after_hours_time": to_iso(info.get("postMarketTime") or info.get("postMarketDateTime")),
+        "high52": info.get("fiftyTwoWeekHigh") or None,
+        "low52": info.get("fiftyTwoWeekLow") or None,
+        "volume": info.get("volume") or (fi.get('volume') if fi else info.get('volume')),
+        "avgVolume": info.get("averageVolume") or None,
+        "marketCap": info.get("marketCap") or None,
+        "open": info.get("open") or (fi.get('open') if fi else info.get('open')),
+        "bid": info.get("bid") or (fi.get('bid') if fi else info.get('bid')),
+        "ask": info.get("ask") or (fi.get('ask') if fi else info.get('ask')),
+        "dayHigh": info.get("dayHigh") or None,
+        "dayLow": info.get("dayLow") or None,
+        "peRatio": info.get("trailingPE") or info.get("forwardPE") or None,
+        "eps": info.get("trailingEps") or info.get("epsTrailingTwelveMonths") or None,
+        "exchange": info.get("exchange") or info.get("exchangeName") or None,
+        "currency": info.get("currency") or None,
+    }
+
+    return result
+
+
+def fetch_history(symbol: str, period: str = '1mo', interval: str = '1d') -> List[Dict]:
+    """Fetch historical OHLCV records for `symbol` using yfinance if available.
+
+    Returns list of records with keys: timestamp, open, high, low, close, volume
+    """
+    records: List[Dict] = []
+    if not HAVE_YF:
+        LOG.warning("yfinance not available; cannot fetch history for %s", symbol)
+        return records
+    try:
+        t = yf.Ticker(symbol)
+        df = t.history(period=period, interval=interval)
+        if df is None or df.empty:
+            return records
+        for idx, row in df.iterrows():
+            try:
+                ts = idx.to_pydatetime() if hasattr(idx, 'to_pydatetime') else datetime.utcfromtimestamp(int(idx))
+                records.append({
+                    "timestamp": ts,
+                    "open": float(row['Open']),
+                    "high": float(row['High']),
+                    "low": float(row['Low']),
+                    "close": float(row['Close']),
+                    "volume": int(row['Volume'])
+                })
+            except Exception:
+                continue
+    except Exception:
+        LOG.exception("Failed to fetch history for %s", symbol)
+    return records
+
+
 def _yahoo_job(limit: Optional[int] = None):
     try:
         run_one_cycle(limit=limit)
