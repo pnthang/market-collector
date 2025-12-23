@@ -14,6 +14,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 
 from .db import SessionLocal, init_db
 from .models import IndexIndicator, IndexPrediction
+from .models import IndexPrice
 
 LOG = logging.getLogger("ml")
 MODELS_DIR = os.getenv("ML_MODELS_DIR", "models")
@@ -160,6 +161,114 @@ def save_latest_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
         return None
     finally:
         session.close()
+
+
+def save_indicators_series(symbol: str, period: str = "1y") -> int:
+    """Compute indicators for the historical series and save each timestamp to `index_indicators`.
+
+    Returns number of rows inserted.
+    """
+    init_db()
+    df = get_stock_data(symbol, period)
+    if df is None or df.empty:
+        LOG.info("No historical data for %s", symbol)
+        return 0
+    ind = calculate_technical_indicators(df)
+    if ind is None or ind.empty:
+        return 0
+    index_code = f"US:{symbol}"
+    session = SessionLocal()
+    inserted = 0
+    try:
+        objs = []
+        for ts, row in ind.iterrows():
+            try:
+                data = row.to_dict()
+                objs.append(IndexIndicator(index_code=index_code, timestamp=ts.to_pydatetime() if hasattr(ts, 'to_pydatetime') else ts, data=data))
+            except Exception:
+                continue
+        session.bulk_save_objects(objs)
+        session.commit()
+        inserted = len(objs)
+        LOG.info("Saved %d indicator rows for %s", inserted, symbol)
+        return inserted
+    except Exception:
+        session.rollback()
+        LOG.exception("Failed saving indicators series for %s", symbol)
+        return 0
+    finally:
+        session.close()
+
+
+def save_history_to_db(symbol: str, period: str = "1y") -> int:
+    """Save historical Close prices to `index_prices` table from yfinance DataFrame.
+
+    Returns number of rows inserted.
+    """
+    init_db()
+    df = get_stock_data(symbol, period)
+    if df is None or df.empty:
+        LOG.info("No historical data for %s to save", symbol)
+        return 0
+    index_code = f"US:{symbol}"
+    session = SessionLocal()
+    try:
+        objs = []
+        for ts, row in df.iterrows():
+            try:
+                objs.append({
+                    'index_code': index_code,
+                    'source': 'yahoo',
+                    'price': float(row['Close']),
+                    'change': float(row['Close'] - row['Open']) if not pd.isna(row['Open']) else None,
+                    'change_percent': float((row['Close'] - row['Open'])/row['Open']*100) if not pd.isna(row['Open']) and row['Open'] != 0 else None,
+                    'timestamp': ts.to_pydatetime() if hasattr(ts, 'to_pydatetime') else ts,
+                })
+            except Exception:
+                continue
+        # dedupe with existing timestamps
+        codes = [o['index_code'] for o in objs]
+        timestamps = [o['timestamp'] for o in objs]
+        existing = set()
+        if codes and timestamps:
+            qres = session.query(IndexPrice.index_code, IndexPrice.timestamp).filter(IndexPrice.index_code.in_(codes), IndexPrice.timestamp.in_(timestamps)).all()
+            existing = {(c, t) for c, t in qres}
+        new_objs = [IndexPrice(**o) for o in objs if (o['index_code'], o['timestamp']) not in existing]
+        if not new_objs:
+            LOG.info("No new historical price rows to insert for %s", symbol)
+            return 0
+        session.bulk_save_objects(new_objs)
+        session.commit()
+        LOG.info("Inserted %d historical price rows for %s", len(new_objs), symbol)
+        return len(new_objs)
+    except Exception:
+        session.rollback()
+        LOG.exception("Failed saving historical prices for %s", symbol)
+        return 0
+    finally:
+        session.close()
+
+
+def run_pipeline(symbol: str, period: str = '2y', train: bool = True, predict_days: int = 3) -> Dict:
+    """Run end-to-end pipeline: save history -> indicators -> train -> predict.
+
+    Returns a brief result summary.
+    """
+    init_db()
+    result = {'symbol': symbol}
+    saved = save_history_to_db(symbol, period)
+    result['history_rows'] = saved
+    ind_rows = save_indicators_series(symbol, period)
+    result['indicator_rows'] = ind_rows
+    model_info = None
+    if train:
+        model_info = train_and_save_model(symbol, period=period)
+        result['trained'] = bool(model_info)
+        result['model_info'] = model_info or {}
+    pred = predict_and_save(symbol, days=predict_days)
+    result['predictions'] = pred.get('predictions') if pred else []
+    result['model_version'] = pred.get('model_version') if pred else None
+    return result
 
 
 def train_and_save_model(symbol: str, period: str = "2y") -> Optional[Dict]:

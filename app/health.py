@@ -208,6 +208,47 @@ def control_ml_predict(symbol: str, days: int = 1):
         return JSONResponse(status_code=500, content={"ok": False})
 
 
+@app.post('/control/ml/pipeline')
+def control_ml_pipeline(symbol: str, period: str = '2y', train: bool = True, predict_days: int = 3):
+    if not symbol:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        res = ml.run_pipeline(symbol, period=period, train=train, predict_days=predict_days)
+        return JSONResponse(content={"ok": True, "result": res})
+    except Exception:
+        LOG.exception("Pipeline failed for %s", symbol)
+        return JSONResponse(status_code=500, content={"ok": False})
+
+
+@app.get('/api/ml/predictions')
+def api_ml_predictions(symbol: str):
+    if not symbol:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        session = SessionLocal()
+        index_code = f"US:{symbol}"
+        rows = session.query(IndexPrediction).filter_by(index_code=index_code).order_by(IndexPrediction.generated_at.desc()).limit(50).all()
+        out = []
+        for r in rows:
+            out.append({
+                'generated_at': r.generated_at.isoformat() if r.generated_at else None,
+                'horizon_days': r.horizon_days,
+                'predicted_price': r.predicted_price,
+                'change_percent': r.change_percent,
+                'model_version': r.model_version,
+                'metadata': r.metadata,
+            })
+        return JSONResponse(content={"ok": True, "symbol": symbol, "predictions": out})
+    except Exception:
+        LOG.exception("Failed to list predictions for %s", symbol)
+        return JSONResponse(status_code=500, content={"ok": False})
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 @app.get('/control/yahoo/fetch')
 def control_yahoo_fetch(symbol: str, period: str = '1mo', interval: str = '1d', limit: int = 200):
     """Fetch realtime + history for a single Yahoo symbol.
