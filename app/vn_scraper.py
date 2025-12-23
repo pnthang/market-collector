@@ -75,12 +75,20 @@ class VNScraper:
         self.scheduler = BackgroundScheduler(timezone="UTC")
 
     def _on_ws_frame(self, payload: str):
+        LOG.debug("WS frame received (len=%d)", len(payload) if payload is not None else 0)
         for entry in _parse_payload(payload):
+            LOG.debug("Parsed entry from WS: %s %s", entry.get("code"), entry.get("price"))
             self.cache[entry["code"]] = entry
 
     def _attach_ws(self, page):
         def on_ws(ws):
-            ws.on("framereceived", lambda frame: self._on_ws_frame(frame.payload))
+            LOG.info("WebSocket opened: %s", getattr(ws, 'url', '<unknown>'))
+            def _on_frame(frame):
+                try:
+                    self._on_ws_frame(frame.payload)
+                except Exception:
+                    LOG.exception("Error handling WS frame")
+            ws.on("framereceived", _on_frame)
 
         page.on("websocket", on_ws)
 
