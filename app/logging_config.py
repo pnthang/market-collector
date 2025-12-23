@@ -27,3 +27,40 @@ def configure_logging(level: str = "INFO"):
     # reduce noisy third-party libs
     logging.getLogger("playwright").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
+    # ensure DB tables exist and add DB log handler
+    try:
+        from .db import init_db, SessionLocal
+        from .models import LogEntry
+
+        init_db()
+
+        class DBLogHandler(logging.Handler):
+            def __init__(self):
+                super().__init__()
+                self.setFormatter(formatter)
+
+            def emit(self, record: logging.LogRecord) -> None:
+                try:
+                    session = SessionLocal()
+                    # format message using handler's formatter
+                    msg = self.format(record)
+                    entry = LogEntry(level=record.levelname, logger=record.name, message=msg)
+                    session.add(entry)
+                    session.commit()
+                except Exception:
+                    try:
+                        session.rollback()
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+
+        # avoid adding duplicate DB handlers
+        if not any(isinstance(h, logging.Handler) and h.__class__.__name__ == 'DBLogHandler' for h in root.handlers):
+            root.addHandler(DBLogHandler())
+    except Exception:
+        # if DB logging setup fails, continue silently (console logging still works)
+        pass

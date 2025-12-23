@@ -73,3 +73,12 @@ class IndexNews(Base):
     publisher = Column(String(255))
     url = Column(String(1024), unique=True)
     published_at = Column(DateTime(timezone=True))
+
+
+class LogEntry(Base):
+    __tablename__ = "logs"
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    level = Column(String(32), index=True)
+    logger = Column(String(255))
+    message = Column(String(4096))
