@@ -139,6 +139,12 @@ def control_yahoo_interval(payload: IntervalHours):
     return {"ok": ok}
 
 
+@app.post('/control/yahoo/interval_seconds')
+def control_yahoo_interval_seconds(payload: IntervalSeconds):
+    ok = yahoo_scraper.set_price_interval(payload.seconds)
+    return {"ok": ok}
+
+
 @app.get('/control/yahoo/fetch')
 def control_yahoo_fetch(symbol: str, period: str = '1mo', interval: str = '1d', limit: int = 200):
     """Fetch realtime + history for a single Yahoo symbol.
