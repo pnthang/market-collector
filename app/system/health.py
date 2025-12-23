@@ -37,8 +37,17 @@ class TokenAuthMiddleware(BaseHTTPMiddleware):
         self.token = token
 
     async def dispatch(self, request: Request, call_next: Callable):
-        # allow unauthenticated health check
-        if request.url.path == "/health":
+        # allow unauthenticated health check and dashboard pages
+        whitelist = {
+            "/health",
+            "/dashboard",
+            "/dashboard/logs",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/docs/oauth2-redirect",
+        }
+        if request.url.path in whitelist:
             return await call_next(request)
 
         # if no token configured, skip auth
