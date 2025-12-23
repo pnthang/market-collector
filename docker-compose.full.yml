@@ -25,10 +25,16 @@ services:
   db:
     image: postgres:15
     restart: unless-stopped
+    # Expose Postgres on the host so remote tools can connect (host:5432 -> container:5432)
+    ports:
+      - "5432:5432"
     environment:
-      POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      # Default initialization credentials — override via env or .env file as needed
+      POSTGRES_USER: ${DB_USER:-marketuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-marketpass}
       POSTGRES_DB: ${DB_NAME:-marketdb}
+    # Ensure Postgres listens on all addresses so remote hosts can connect
+    command: ["postgres", "-c", "listen_addresses='*'"]
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
