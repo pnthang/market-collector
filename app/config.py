@@ -25,3 +25,4 @@ DB_POOL_PRE_PING = os.getenv("DB_POOL_PRE_PING", "true").lower() in ("1", "true"
 
 # API token for protecting control endpoints. If empty, auth is disabled.
 API_TOKEN = os.getenv("API_TOKEN", "")
+LOG_FILE = os.getenv("LOG_FILE", "/tmp/market-collector.log")

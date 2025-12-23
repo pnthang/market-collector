@@ -12,6 +12,10 @@ from . import vn_scraper
 from . import yahoo_scraper
 from pydantic import BaseModel
 from .config import API_TOKEN
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from .config import LOG_FILE
+import io
+import os
 
 LOG = logging.getLogger("health")
 
@@ -155,3 +159,74 @@ def control_vn_snapshot(force: bool = False):
         inst._take_snapshot()
 
     return {"ok": True}
+
+
+
+@app.get('/dashboard')
+def dashboard():
+        html = """
+        <!doctype html>
+        <html>
+        <head>
+            <meta charset="utf-8" />
+            <title>Market Collector Dashboard</title>
+            <style>body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:16px}button{margin:4px}</style>
+        </head>
+        <body>
+            <h2>Market Collector — Dashboard</h2>
+            <div>
+                <button onclick="fetch('/control/vn/snapshot', {method:'POST'}).then(r=>r.json()).then(j=>alert(JSON.stringify(j)))">Snapshot (now)</button>
+                <button onclick="fetch('/control/vn/snapshot?force=true', {method:'POST'}).then(r=>r.json()).then(j=>alert(JSON.stringify(j)))">Snapshot (force)</button>
+            </div>
+            <div style="margin-top:12px">
+                <label>Set snapshot interval (seconds): </label>
+                <input id="interval" type="number" value="15" style="width:80px"/>
+                <button onclick="setInterval()">Set</button>
+            </div>
+            <div style="margin-top:12px">
+                <h3>Logs</h3>
+                <label>Lines: </label><input id="lines" type="number" value="200" style="width:80px"/>
+                <button onclick="loadLogs()">Refresh</button>
+                <pre id="logs" style="height:400px;overflow:auto;border:1px solid #ddd;padding:8px;background:#f9f9f9"></pre>
+            </div>
+            <script>
+                function setInterval(){
+                    const seconds = parseInt(document.getElementById('interval').value||'15',10);
+                    fetch('/control/vn/interval', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({seconds})}).then(r=>r.json()).then(j=>alert(JSON.stringify(j)));
+                }
+                function loadLogs(){
+                    const lines = parseInt(document.getElementById('lines').value||'200',10);
+                    fetch('/dashboard/logs?lines='+lines).then(r=>r.text()).then(t=>{document.getElementById('logs').textContent = t});
+                }
+                loadLogs();
+                setInterval(loadLogs, 15000);
+            </script>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html)
+
+
+def _tail_file(path: str, lines: int = 200) -> str:
+        if not path or not os.path.exists(path):
+                return ""
+        # simple tail implementation
+        avg_line_len = 200
+        to_read = lines * avg_line_len
+        try:
+                with open(path, 'rb') as f:
+                        try:
+                                f.seek(-to_read, os.SEEK_END)
+                        except OSError:
+                                f.seek(0, os.SEEK_SET)
+                        data = f.read().decode(errors='replace')
+                parts = data.splitlines()
+                return '\n'.join(parts[-lines:])
+        except Exception:
+                return ''
+
+
+@app.get('/dashboard/logs')
+def dashboard_logs(lines: int = 200):
+        txt = _tail_file(LOG_FILE, lines=lines)
+        return PlainTextResponse(content=txt)
