@@ -23,6 +23,7 @@ import time
 from .playwright_manager import BrowserManager
 from .db import SessionLocal
 from .models import IndexTracking
+from . import ml
 
 LOG = logging.getLogger("health")
 
@@ -162,6 +163,48 @@ def control_yahoo_force_eastern(enable: bool = True):
         return JSONResponse(content={"ok": True, "force_us_eastern": val})
     except Exception:
         LOG.exception("Failed to set force_eastern flag")
+        return JSONResponse(status_code=500, content={"ok": False})
+
+
+@app.post('/control/ml/indicators')
+def control_ml_indicators(symbol: str):
+    if not symbol:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        res = ml.save_latest_indicators(symbol)
+        if res is None:
+            return JSONResponse(status_code=500, content={"ok": False, "reason": "failed"})
+        return JSONResponse(content={"ok": True, "symbol": symbol})
+    except Exception:
+        LOG.exception("Failed to compute indicators for %s", symbol)
+        return JSONResponse(status_code=500, content={"ok": False})
+
+
+@app.post('/control/ml/train')
+def control_ml_train(symbol: str):
+    if not symbol:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        res = ml.train_and_save_model(symbol)
+        if not res:
+            return JSONResponse(status_code=500, content={"ok": False, "reason": "train_failed"})
+        return JSONResponse(content={"ok": True, "model_path": res.get('model_path'), "metrics": res.get('metrics')})
+    except Exception:
+        LOG.exception("Model training failed for %s", symbol)
+        return JSONResponse(status_code=500, content={"ok": False})
+
+
+@app.post('/control/ml/predict')
+def control_ml_predict(symbol: str, days: int = 1):
+    if not symbol:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        res = ml.predict_and_save(symbol, days=days)
+        if not res:
+            return JSONResponse(status_code=500, content={"ok": False, "reason": "predict_failed"})
+        return JSONResponse(content={"ok": True, "result": res})
+    except Exception:
+        LOG.exception("Prediction failed for %s", symbol)
         return JSONResponse(status_code=500, content={"ok": False})
 
 

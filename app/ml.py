@@ -1,0 +1,222 @@
+import os
+import logging
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import joblib
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+
+from .db import SessionLocal, init_db
+from .models import IndexIndicator, IndexPrediction
+
+LOG = logging.getLogger("ml")
+MODELS_DIR = os.getenv("ML_MODELS_DIR", "models")
+os.makedirs(MODELS_DIR, exist_ok=True)
+
+
+def get_stock_data(symbol: str, period: str = "1y") -> Optional[pd.DataFrame]:
+    try:
+        df = yf.download(symbol, period=period, progress=False)
+        if df is None or df.empty:
+            return None
+        # handle MultiIndex
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
+        required_cols = ["Open", "High", "Low", "Close", "Volume"]
+        if not all(c in df.columns for c in required_cols):
+            return None
+        df = df.dropna(how="all")
+        return df
+    except Exception:
+        LOG.exception("Failed to download data for %s", symbol)
+        return None
+
+
+def calculate_technical_indicators(df: pd.DataFrame) -> Optional[pd.DataFrame]:
+    if df is None or df.empty:
+        return None
+    df = df.copy()
+    # basic indicators
+    df["SMA_20"] = df["Close"].rolling(window=20).mean()
+    df["SMA_50"] = df["Close"].rolling(window=50).mean()
+    df["EMA_12"] = df["Close"].ewm(span=12).mean()
+    df["EMA_26"] = df["Close"].ewm(span=26).mean()
+    df["MACD"] = df["EMA_12"] - df["EMA_26"]
+    # RSI
+    delta = df["Close"].diff()
+    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df["RSI"] = 100 - (100 / (1 + rs))
+    # ATR simple
+    high_low = df["High"] - df["Low"]
+    high_close = (df["High"] - df["Close"].shift()).abs()
+    low_close = (df["Low"] - df["Close"].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df["ATR"] = tr.rolling(window=14).mean()
+    # volume
+    df["Vol_SMA20"] = df["Volume"].rolling(window=20).mean()
+    # percent change
+    df["Pct_Change"] = df["Close"].pct_change()
+    # fill/keep NaNs — model training will drop them
+    return df
+
+
+def save_latest_indicators(symbol: str, period: str = "1y") -> Optional[Dict]:
+    init_db()
+    df = get_stock_data(symbol, period)
+    if df is None or df.empty:
+        LOG.info("No data for %s to compute indicators", symbol)
+        return None
+    ind = calculate_technical_indicators(df)
+    if ind is None or ind.empty:
+        return None
+    latest = ind.iloc[-1].to_dict()
+    ts = ind.index[-1]
+    index_code = f"US:{symbol}"
+    session = SessionLocal()
+    try:
+        row = IndexIndicator(index_code=index_code, timestamp=ts.to_pydatetime() if hasattr(ts, 'to_pydatetime') else ts, data=latest)
+        session.add(row)
+        session.commit()
+        LOG.info("Saved latest indicators for %s at %s", symbol, ts)
+        return latest
+    except Exception:
+        session.rollback()
+        LOG.exception("Failed to save indicators for %s", symbol)
+        return None
+    finally:
+        session.close()
+
+
+def train_and_save_model(symbol: str, period: str = "2y") -> Optional[Dict]:
+    init_db()
+    df = get_stock_data(symbol, period)
+    if df is None or len(df) < 120:
+        LOG.info("Insufficient data to train model for %s", symbol)
+        return None
+    ind = calculate_technical_indicators(df)
+    # prepare features
+    features = [c for c in ind.columns if c not in ["Close", "Adj Close"]]
+    X = ind[features].copy()
+    y = ind["Close"].shift(-1).dropna()
+    X = X.iloc[:-1]
+    # drop rows with NaN
+    mask = X.notna().all(axis=1)
+    X = X.loc[mask]
+    y = y.loc[mask.index.intersection(y.index)]
+    if X.shape[0] < 50:
+        LOG.info("Not enough feature rows after cleaning for %s", symbol)
+        return None
+    # split
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+    y_pred_test = model.predict(X_test)
+    test_mse = float(mean_squared_error(y_test, y_pred_test))
+    test_r2 = float(r2_score(y_test, y_pred_test))
+    # save
+    model_name = f"{symbol}_rf_{int(datetime.utcnow().timestamp())}.pkl"
+    model_path = os.path.join(MODELS_DIR, model_name)
+    joblib.dump(model, model_path)
+    LOG.info("Trained model for %s saved to %s", symbol, model_path)
+    return {
+        'model_path': model_path,
+        'metrics': {'test_mse': test_mse, 'test_r2': test_r2},
+        'features': features
+    }
+
+
+def predict_and_save(symbol: str, days: int = 1) -> Optional[Dict]:
+    init_db()
+    # find latest model file for symbol
+    files = [f for f in os.listdir(MODELS_DIR) if f.startswith(symbol + "_") and f.endswith('.pkl')]
+    files.sort(reverse=True)
+    model = None
+    model_version = None
+    if files:
+        model_path = os.path.join(MODELS_DIR, files[0])
+        try:
+            model = joblib.load(model_path)
+            model_version = files[0]
+        except Exception:
+            LOG.exception("Failed to load model %s", model_path)
+            model = None
+    else:
+        # try training on the fly
+        res = train_and_save_model(symbol)
+        if res and res.get('model_path'):
+            try:
+                model = joblib.load(res['model_path'])
+                model_version = os.path.basename(res['model_path'])
+            except Exception:
+                LOG.exception("Failed to load newly trained model for %s", symbol)
+                model = None
+    # get latest data
+    df = get_stock_data(symbol, '1y')
+    if df is None or df.empty:
+        LOG.info("No data to predict for %s", symbol)
+        return None
+    ind = calculate_technical_indicators(df)
+    if ind is None or ind.empty:
+        return None
+    current_price = float(ind['Close'].iloc[-1])
+    preds = []
+    temp_df = ind.copy()
+    for day in range(1, max(1, int(days)) + 1):
+        pred = None
+        if model is not None:
+            feat = temp_df.iloc[-1:].drop(['Close', 'Adj Close'], axis=1, errors='ignore')
+            if feat.isna().any(axis=1).any():
+                # cannot predict with NaNs
+                pred = None
+            else:
+                try:
+                    pred = float(model.predict(feat)[0])
+                except Exception:
+                    LOG.exception("Model prediction failed for %s", symbol)
+                    pred = None
+        if pred is None:
+            # fallback: mean return
+            returns = temp_df['Close'].pct_change().dropna()
+            mean_ret = float(returns.mean()) if not returns.empty else 0.0
+            pred = float(current_price * (1 + mean_ret))
+        change_pct = ((pred - current_price) / current_price) * 100 if current_price else None
+        preds.append({'day': day, 'predicted_price': float(pred), 'change_percent': float(change_pct) if change_pct is not None else None})
+        # append synthetic row
+        try:
+            last_idx = temp_df.index[-1]
+            try:
+                next_idx = last_idx + timedelta(days=1)
+            except Exception:
+                next_idx = last_idx
+            synthetic = temp_df.iloc[-1:].copy()
+            synthetic.iloc[0]['Open'] = pred
+            synthetic.iloc[0]['High'] = pred
+            synthetic.iloc[0]['Low'] = pred
+            synthetic.iloc[0]['Close'] = pred
+            synthetic.index = [next_idx]
+            temp_df = pd.concat([temp_df, synthetic])
+            current_price = pred
+        except Exception:
+            break
+    # save predictions to DB
+    session = SessionLocal()
+    try:
+        index_code = f"US:{symbol}"
+        for p in preds:
+            row = IndexPrediction(index_code=index_code, horizon_days=int(p['day']), predicted_price=float(p['predicted_price']), change_percent=float(p['change_percent']) if p['change_percent'] is not None else None, model_version=model_version, metadata={'method': 'rf' if model is not None else 'fallback'})
+            session.add(row)
+        session.commit()
+        LOG.info("Saved %d predictions for %s", len(preds), symbol)
+    except Exception:
+        session.rollback()
+        LOG.exception("Failed to save predictions for %s", symbol)
+    finally:
+        session.close()
+    return {'symbol': symbol, 'current_price': float(ind['Close'].iloc[-1]), 'predictions': preds, 'model_version': model_version}

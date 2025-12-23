@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstraint, Index, func
+from sqlalchemy import JSON
 from .db import Base
 
 
@@ -91,3 +92,24 @@ class IndexTracking(Base):
     symbol = Column(String(128), unique=True, nullable=False, index=True)
     name = Column(String(255))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class IndexIndicator(Base):
+    __tablename__ = "index_indicators"
+    id = Column(Integer, primary_key=True)
+    index_code = Column(String(64), nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    data = Column(JSON)
+    source = Column(String(64), default='ml')
+
+
+class IndexPrediction(Base):
+    __tablename__ = "index_predictions"
+    id = Column(Integer, primary_key=True)
+    index_code = Column(String(64), nullable=False, index=True)
+    generated_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    horizon_days = Column(Integer, nullable=False)
+    predicted_price = Column(Float, nullable=False)
+    change_percent = Column(Float)
+    model_version = Column(String(255))
+    metadata = Column(JSON)

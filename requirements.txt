@@ -12,3 +12,7 @@ beautifulsoup4
 alembic
 yfinance
 pandas
+numpy
+scikit-learn
+ta
+joblib
