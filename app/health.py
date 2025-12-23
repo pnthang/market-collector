@@ -137,6 +137,33 @@ def control_yahoo_interval(payload: IntervalHours):
     return {"ok": ok}
 
 
+@app.get('/control/yahoo/fetch')
+def control_yahoo_fetch(symbol: str, period: str = '1mo', interval: str = '1d', limit: int = 200):
+    """Fetch realtime + history for a single Yahoo symbol.
+
+    Protected by the same token middleware. Returns JSON with keys `realtime` and `history`.
+    """
+    if not symbol:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        realtime = yahoo_scraper.fetch_realtime(symbol)
+        history = yahoo_scraper.fetch_history(symbol, period=period, interval=interval)
+        # limit history entries and convert timestamps to ISO
+        hist_out = []
+        for rec in history[-limit:]:
+            r = rec.copy()
+            ts = r.get('timestamp')
+            if hasattr(ts, 'isoformat'):
+                r['timestamp'] = ts.isoformat()
+            else:
+                r['timestamp'] = str(ts)
+            hist_out.append(r)
+        return JSONResponse(content={"ok": True, "symbol": symbol, "realtime": realtime, "history": hist_out})
+    except Exception:
+        LOG.exception("Error fetching yahoo data for %s", symbol)
+        return JSONResponse(status_code=500, content={"ok": False, "reason": "fetch failed"})
+
+
 @app.post('/control/vn/snapshot')
 def control_vn_snapshot(force: bool = False):
     """Trigger an immediate one-time snapshot from the running VN scraper.
