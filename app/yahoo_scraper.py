@@ -29,7 +29,11 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR
 
+from .config import MARKET_TZ
+from .utils import is_market_open_at
+
 _YAHOO_SCHEDULER = None
+_YAHOO_PRICE_INTERVAL = 15
 
 LOG = logging.getLogger("yahoo_scraper")
 
@@ -349,11 +353,47 @@ def _yahoo_job(limit: Optional[int] = None):
         LOG.exception("Yahoo scheduled job failed")
 
 
-def start_scheduler(hours: int = 2, limit: Optional[int] = None):
-    global _YAHOO_SCHEDULER
+def _yahoo_price_job():
+    """Fetch prices for tracked symbols (or discovered ones) during market hours."""
+    now = datetime.utcnow()
+    if not is_market_open_at(now, MARKET_TZ):
+        LOG.debug("Yahoo price job: market closed — skipping")
+        return
+
+    session = SessionLocal()
+    try:
+        tracked = session.query(IndexTracking).order_by(IndexTracking.created_at.desc()).all()
+        if tracked:
+            symbols = [t.symbol for t in tracked]
+        else:
+            symbols = discover_indices()
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+    if not symbols:
+        LOG.debug("Yahoo price job: no symbols to fetch")
+        return
+
+    try:
+        quotes = fetch_quotes(symbols)
+        save_quotes(quotes)
+        LOG.info("Yahoo price job: fetched %d symbols", len(quotes))
+    except Exception:
+        LOG.exception("Yahoo price job failed")
+
+
+def start_scheduler(hours: int = 2, limit: Optional[int] = None, price_interval_seconds: int = 15):
+    global _YAHOO_SCHEDULER, _YAHOO_PRICE_INTERVAL
+    _YAHOO_PRICE_INTERVAL = int(price_interval_seconds)
     if _YAHOO_SCHEDULER is None:
         _YAHOO_SCHEDULER = BackgroundScheduler(timezone='UTC')
+        # analysis/news job every N hours
         _YAHOO_SCHEDULER.add_job(lambda: _yahoo_job(limit), 'interval', hours=hours, id='yahoo_fetch')
+        # price job every price_interval_seconds (but each run checks market hours)
+        _YAHOO_SCHEDULER.add_job(_yahoo_price_job, 'interval', seconds=_YAHOO_PRICE_INTERVAL, id='yahoo_prices')
         _YAHOO_SCHEDULER.add_listener(lambda ev: LOG.exception("Job error: %s", ev.exception) if ev.code == EVENT_JOB_ERROR else None)
         _YAHOO_SCHEDULER.start()
     return _YAHOO_SCHEDULER
@@ -382,6 +422,24 @@ def set_scheduler_interval(hours: int):
         return True
     except Exception:
         LOG.exception("Failed to set yahoo scheduler interval")
+        return False
+
+
+def set_price_interval(seconds: int):
+    global _YAHOO_SCHEDULER, _YAHOO_PRICE_INTERVAL
+    if _YAHOO_SCHEDULER is None:
+        _YAHOO_PRICE_INTERVAL = int(seconds)
+        return False
+    try:
+        try:
+            _YAHOO_SCHEDULER.remove_job('yahoo_prices')
+        except Exception:
+            pass
+        _YAHOO_PRICE_INTERVAL = int(seconds)
+        _YAHOO_SCHEDULER.add_job(_yahoo_price_job, 'interval', seconds=_YAHOO_PRICE_INTERVAL, id='yahoo_prices')
+        return True
+    except Exception:
+        LOG.exception("Failed to set yahoo price interval")
         return False
 
 
