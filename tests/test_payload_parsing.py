@@ -1,4 +1,4 @@
-from app.vn_scraper import _parse_payload
+from app.data_scraper.vn_scraper import _parse_payload
 
 
 def test_parse_simple_message():

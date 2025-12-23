@@ -106,7 +106,7 @@ The unit expects a container named `market-collector` (the `scripts/setup_ubuntu
 
 ## Files of interest
 
-- `app/` — main application package (`vn_scraper.py`, `playwright_manager.py`, DB models, health endpoint)
+- `app/` — main application package (see `app/data_scraper/` for scrapers, `app/db/` for DB models, health endpoint)
 - `app/fetch_group_playwright.py` — Playwright-backed group fetcher
 - `app/fetch_group_auto.py` — HTTP-first fetch with Playwright fallback
 - `Dockerfile`, `docker-compose.yml` — containerization
