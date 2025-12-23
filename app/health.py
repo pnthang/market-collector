@@ -2,15 +2,52 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import logging
+from fastapi import Request, HTTPException, status
+from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Callable
+import os
 
 from .db import engine
 from . import vn_scraper
 from . import yahoo_scraper
 from pydantic import BaseModel
+from .config import API_TOKEN
 
 LOG = logging.getLogger("health")
 
 app = FastAPI(title="market-collector-health")
+
+
+# Middleware to enforce simple token auth on all endpoints except /health
+class TokenAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, token: str):
+        super().__init__(app)
+        self.token = token
+
+    async def dispatch(self, request: Request, call_next: Callable):
+        # allow unauthenticated health check
+        if request.url.path == "/health":
+            return await call_next(request)
+
+        # if no token configured, skip auth
+        if not self.token:
+            return await call_next(request)
+
+        # try header `x-api-token` or `Authorization: Bearer ...`
+        token = request.headers.get("x-api-token")
+        if not token:
+            auth = request.headers.get("authorization") or request.headers.get("Authorization")
+            if auth and auth.lower().startswith("bearer "):
+                token = auth.split(None, 1)[1].strip()
+
+        if token != self.token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing API token")
+
+        return await call_next(request)
+
+
+# attach middleware
+app.add_middleware(TokenAuthMiddleware, token=API_TOKEN)
 
 
 def check_db() -> bool:
