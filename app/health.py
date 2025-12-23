@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from .config import LOG_FILE
 import io
 import os
+from typing import List
 
 LOG = logging.getLogger("health")
 
@@ -227,6 +228,31 @@ def _tail_file(path: str, lines: int = 200) -> str:
 
 
 @app.get('/dashboard/logs')
-def dashboard_logs(lines: int = 200):
+    def dashboard_logs(lines: int = 200):
+        # Try to read recent logs from DB first
+        try:
+            from .db import SessionLocal
+            from .models import LogEntry
+
+            session = SessionLocal()
+            try:
+                q = session.query(LogEntry).order_by(LogEntry.created_at.desc()).limit(lines).all()
+                # format entries newest-last
+                q = list(reversed(q))
+                out_lines: List[str] = []
+                for e in q:
+                    ts = e.created_at.isoformat() if e.created_at is not None else ""
+                    out_lines.append(f"{ts} {e.level} {e.logger} - {e.message}")
+                if out_lines:
+                    return PlainTextResponse(content="\n".join(out_lines))
+            finally:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+        except Exception:
+            # DB unavailable or models not ready, fall back to file
+            pass
+
         txt = _tail_file(LOG_FILE, lines=lines)
         return PlainTextResponse(content=txt)
