@@ -34,6 +34,14 @@ from .utils import is_market_open_at
 
 _YAHOO_SCHEDULER = None
 _YAHOO_PRICE_INTERVAL = 15
+# When True, force market hours checks to use US/Eastern regardless of MARKET_TZ
+FORCE_US_EASTERN = False
+
+def set_force_us_eastern(enabled: bool):
+    global FORCE_US_EASTERN
+    FORCE_US_EASTERN = bool(enabled)
+    LOG.info("Force US/Eastern market hours: %s", FORCE_US_EASTERN)
+    return FORCE_US_EASTERN
 
 LOG = logging.getLogger("yahoo_scraper")
 
@@ -126,6 +134,7 @@ def fetch_quotes(symbols: List[str]) -> List[Dict]:
     session = requests.Session()
     retries = Retry(total=3, backoff_factor=0.3, status_forcelist=(429, 500, 502, 503, 504))
     session.mount("https://", HTTPAdapter(max_retries=retries))
+    LOG.info("Fetching %d symbols from Yahoo API", len(symbols))
     resp = session.get(YAHOO_QUOTE_API, params=params, timeout=10)
     resp.raise_for_status()
     data = resp.json()
@@ -195,6 +204,7 @@ def scrape_news_and_analysis(symbol: str, timeout: int = 15) -> Dict[str, List[D
 def save_quotes(quotes: List[Dict]):
     if not quotes:
         return
+    LOG.info("Saving %d quotes to DB", len(quotes))
     session = SessionLocal()
     now = datetime.utcnow()
     objs = []
@@ -223,9 +233,11 @@ def save_quotes(quotes: List[Dict]):
             existing = {(c, t) for c, t in qres}
         new_objs = [IndexPrice(**o) for o in objs if (o['index_code'], o['timestamp']) not in existing]
         if not new_objs:
+            LOG.info("No new quote rows after dedupe")
             return
         session.bulk_save_objects(new_objs)
         session.commit()
+        LOG.info("Inserted %d quote rows", len(new_objs))
     except Exception:
         session.rollback()
         for o in objs:
@@ -356,8 +368,9 @@ def _yahoo_job(limit: Optional[int] = None):
 def _yahoo_price_job():
     """Fetch prices for tracked symbols (or discovered ones) during market hours."""
     now = datetime.utcnow()
-    if not is_market_open_at(now, MARKET_TZ):
-        LOG.debug("Yahoo price job: market closed — skipping")
+    tz_to_use = 'US/Eastern' if FORCE_US_EASTERN else MARKET_TZ
+    if not is_market_open_at(now, tz_to_use):
+        LOG.info("Yahoo price job: market closed (%s) — skipping", tz_to_use)
         return
 
     session = SessionLocal()
@@ -374,7 +387,7 @@ def _yahoo_price_job():
             pass
 
     if not symbols:
-        LOG.debug("Yahoo price job: no symbols to fetch")
+        LOG.info("Yahoo price job: no symbols to fetch")
         return
 
     try:

@@ -94,11 +94,11 @@ class VNScraper:
 
     def _take_snapshot(self):
         if not self.cache:
-            LOG.debug("No data in cache to snapshot")
+            LOG.info("No data in cache to snapshot")
             return
         now = datetime.utcnow()
         if not is_market_open_at(now, MARKET_TZ):
-            LOG.debug("Market closed — skipping snapshot")
+            LOG.info("Market closed — skipping snapshot")
             return
 
         rows = []

@@ -151,6 +151,20 @@ def control_yahoo_price_run():
     return {"ok": ok}
 
 
+@app.post('/control/yahoo/force_eastern')
+def control_yahoo_force_eastern(enable: bool = True):
+    """Toggle forcing US/Eastern for market-hours checks used by the Yahoo price job.
+
+    Use `?enable=true` or `?enable=false` as a query parameter.
+    """
+    try:
+        val = yahoo_scraper.set_force_us_eastern(bool(enable))
+        return JSONResponse(content={"ok": True, "force_us_eastern": val})
+    except Exception:
+        LOG.exception("Failed to set force_eastern flag")
+        return JSONResponse(status_code=500, content={"ok": False})
+
+
 @app.get('/control/yahoo/fetch')
 def control_yahoo_fetch(symbol: str, period: str = '1mo', interval: str = '1d', limit: int = 200):
     """Fetch realtime + history for a single Yahoo symbol.
