@@ -104,6 +104,10 @@ if [[ ! -f "${COMPOSE_FILE}" ]]; then
   exit 2
 fi
 
+echo "Stopping and removing any existing compose stack (if present)"
+# best-effort stop/remove prior containers to ensure a clean start
+docker compose -f "${COMPOSE_FILE}" down --remove-orphans --volumes || true
+
 echo "Starting compose stack using ${COMPOSE_FILE}"
 if [[ "${NO_BUILD}" -eq 1 ]]; then
   docker compose -f "${COMPOSE_FILE}" up -d
