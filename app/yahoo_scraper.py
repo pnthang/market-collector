@@ -24,7 +24,7 @@ except Exception:
 
 from .playwright_manager import BrowserManager
 from .db import SessionLocal, init_db
-from .models import IndexMetadata, IndexPrice, IndexNews, IndexAnalysis
+from .models import IndexMetadata, IndexPrice, IndexNews, IndexAnalysis, IndexTracking
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.events import EVENT_JOB_ERROR
@@ -411,7 +411,24 @@ def save_news_analysis(symbol: str, payload: Dict[str, List[Dict]]):
 
 def run_one_cycle(limit: Optional[int] = None):
     init_db()
-    symbols = discover_indices(limit=limit)
+    # Prefer fetching symbols tracked by the user. If none tracked, fall back to discovery.
+    session = SessionLocal()
+    try:
+        tracked = session.query(IndexTracking).order_by(IndexTracking.created_at.desc()).all()
+        if tracked:
+            symbols = [t.symbol for t in tracked]
+        else:
+            symbols = discover_indices(limit=limit)
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+    if not symbols:
+        LOG.info("No symbols to fetch in this cycle")
+        return
+
     quotes = fetch_quotes(symbols)
     save_quotes(quotes)
     for s in symbols:
