@@ -163,6 +163,33 @@ def control_vn_snapshot(force: bool = False):
 
 
 
+@app.get('/control/vn/cache')
+def control_vn_cache():
+    """Return a JSON-serializable copy of the scraper's in-memory cache for debugging."""
+    inst = getattr(vn_scraper, "SCRAPER_INSTANCE", None)
+    if inst is None:
+        return JSONResponse(content={"ok": False, "reason": "scraper not running", "cache": {}})
+
+    def _make_safe(obj):
+        # recursively make simple JSON-serializable representation
+        if isinstance(obj, dict):
+            return {k: _make_safe(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_make_safe(v) for v in obj]
+        try:
+            # test JSON-serializable
+            import json
+
+            json.dumps(obj)
+            return obj
+        except Exception:
+            return str(obj)
+
+    safe_cache = {k: _make_safe(v) for k, v in inst.cache.items()} if getattr(inst, 'cache', None) else {}
+    return JSONResponse(content={"ok": True, "cache": safe_cache})
+
+
+
 @app.get('/dashboard')
 def dashboard():
         html = """
