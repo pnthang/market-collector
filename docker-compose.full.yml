@@ -10,6 +10,7 @@ services:
       - redis
     ports:
       - "8000:8000"
+      - "8383:8000"
     command: uvicorn app.system.health:app --host 0.0.0.0 --port 8000
     volumes:
       - ./:/usr/src/app
@@ -44,6 +45,11 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   init_db:
     build: .
