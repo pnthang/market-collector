@@ -443,6 +443,16 @@ def set_price_interval(seconds: int):
         return False
 
 
+def run_price_once():
+    """Trigger a one-time run of the price job (useful for API/manual runs)."""
+    try:
+        _yahoo_price_job()
+        return True
+    except Exception:
+        LOG.exception("run_price_once failed")
+        return False
+
+
 def save_news_analysis(symbol: str, payload: Dict[str, List[Dict]]):
     session = SessionLocal()
     try:

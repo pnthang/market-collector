@@ -145,6 +145,12 @@ def control_yahoo_interval_seconds(payload: IntervalSeconds):
     return {"ok": ok}
 
 
+@app.post('/control/yahoo/price_run')
+def control_yahoo_price_run():
+    ok = yahoo_scraper.run_price_once()
+    return {"ok": ok}
+
+
 @app.get('/control/yahoo/fetch')
 def control_yahoo_fetch(symbol: str, period: str = '1mo', interval: str = '1d', limit: int = 200):
     """Fetch realtime + history for a single Yahoo symbol.
@@ -385,6 +391,12 @@ def dashboard():
                 <button onclick="setInterval()">Set</button>
             </div>
             <div style="margin-top:12px">
+                <label>Yahoo price interval (seconds): </label>
+                <input id="yahoo_interval" type="number" value="15" style="width:80px"/>
+                <button onclick="setYahooInterval()">Set</button>
+                <button onclick="runYahooNow()">Run Now</button>
+            </div>
+            <div style="margin-top:12px">
                 <h3>Logs</h3>
                 <label>Lines: </label><input id="lines" type="number" value="200" style="width:80px"/>
                 <button onclick="loadLogs()">Refresh</button>
@@ -402,6 +414,14 @@ def dashboard():
                 function setInterval(){
                     const seconds = parseInt(document.getElementById('interval').value||'15',10);
                     fetch('/control/vn/interval', {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({seconds})}).then(r=>r.json()).then(j=>alert(JSON.stringify(j)));
+                }
+                function setYahooInterval(){
+                    const seconds = parseInt(document.getElementById('yahoo_interval').value||'15',10);
+                    fetch('/control/yahoo/interval_seconds', {method:'POST', headers:{'content-type':'application/json','x-api-token': window._api_token||''}, body:JSON.stringify({seconds})}).then(r=>r.json()).then(j=>alert(JSON.stringify(j)));
+                }
+
+                function runYahooNow(){
+                    fetch('/control/yahoo/price_run', {method:'POST', headers:{'x-api-token': window._api_token||''}}).then(r=>r.json()).then(j=>alert(JSON.stringify(j)));
                 }
                 function loadLogs(){
                     const lines = parseInt(document.getElementById('lines').value||'200',10);
