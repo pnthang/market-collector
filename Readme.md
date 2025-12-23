@@ -88,11 +88,11 @@ The health endpoint will be available at `http://localhost:8080/health`.
 
 - HTTP-first fetch (falls back to Playwright if blocked):
 
-  python -m app.fetch_group_auto VN30
+  python -m app.data_scraper.fetch_group_auto VN30
 
 - Fetch multiple groups (defaults to `VN30` and `VNALL`):
 
-  python -m app.fetch_groups
+  python -m app.data_scraper.fetch_groups
 
 ## Systemd (host) — run container as a service
 
@@ -107,8 +107,8 @@ The unit expects a container named `market-collector` (the `scripts/setup_ubuntu
 ## Files of interest
 
 - `app/` — main application package (see `app/data_scraper/` for scrapers, `app/db/` for DB models, health endpoint)
-- `app/fetch_group_playwright.py` — Playwright-backed group fetcher
-- `app/fetch_group_auto.py` — HTTP-first fetch with Playwright fallback
+- `app/data_scraper/fetch_group_playwright.py` — Playwright-backed group fetcher
+- `app/data_scraper/fetch_group_auto.py` — HTTP-first fetch with Playwright fallback
 - `Dockerfile`, `docker-compose.yml` — containerization
 - `scripts/setup_ubuntu.sh` — helper to clone, build, and run using PAT
 - `systemd/market-collector.service` — example systemd unit
