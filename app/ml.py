@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import joblib
+import ta
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
@@ -41,29 +42,96 @@ def calculate_technical_indicators(df: pd.DataFrame) -> Optional[pd.DataFrame]:
     if df is None or df.empty:
         return None
     df = df.copy()
-    # basic indicators
-    df["SMA_20"] = df["Close"].rolling(window=20).mean()
-    df["SMA_50"] = df["Close"].rolling(window=50).mean()
-    df["EMA_12"] = df["Close"].ewm(span=12).mean()
-    df["EMA_26"] = df["Close"].ewm(span=26).mean()
-    df["MACD"] = df["EMA_12"] - df["EMA_26"]
+
+    # Moving averages
+    df['SMA_20'] = df['Close'].rolling(window=20).mean()
+    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+    df['SMA_200'] = df['Close'].rolling(window=200).mean()
+
+    # Exponential moving averages
+    df['EMA_12'] = df['Close'].ewm(span=12).mean()
+    df['EMA_26'] = df['Close'].ewm(span=26).mean()
+
+    # MACD
+    df['MACD'] = df['EMA_12'] - df['EMA_26']
+    df['MACD_signal'] = df['MACD'].ewm(span=9).mean()
+    df['MACD_histogram'] = df['MACD'] - df['MACD_signal']
+
     # RSI
-    delta = df["Close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+    delta = df['Close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss
-    df["RSI"] = 100 - (100 / (1 + rs))
-    # ATR simple
-    high_low = df["High"] - df["Low"]
-    high_close = (df["High"] - df["Close"].shift()).abs()
-    low_close = (df["Low"] - df["Close"].shift()).abs()
-    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    df["ATR"] = tr.rolling(window=14).mean()
-    # volume
-    df["Vol_SMA20"] = df["Volume"].rolling(window=20).mean()
-    # percent change
-    df["Pct_Change"] = df["Close"].pct_change()
-    # fill/keep NaNs — model training will drop them
+    df['RSI'] = 100 - (100 / (1 + rs))
+
+    # Bollinger Bands
+    df['BB_middle'] = df['Close'].rolling(window=20).mean()
+    bb_std = df['Close'].rolling(window=20).std()
+    df['BB_upper'] = df['BB_middle'] + (bb_std * 2)
+    df['BB_lower'] = df['BB_middle'] - (bb_std * 2)
+
+    # Volume indicators
+    df['Volume_SMA'] = df['Volume'].rolling(window=20).mean()
+    df['Volume_ratio'] = df['Volume'] / df['Volume'].rolling(window=20).mean()
+
+    # Price-based indicators
+    df['High_Low_Pct'] = (df['High'] - df['Low']) / df['Close'] * 100
+    df['Price_Change'] = df['Close'] - df['Open']
+    df['Price_Change_Pct'] = (df['Close'] - df['Open']) / df['Open'] * 100
+
+    # Volatility / ATR
+    df['High_Low'] = df['High'] - df['Low']
+    df['High_Close'] = (df['High'] - df['Close'].shift()).abs()
+    df['Low_Close'] = (df['Low'] - df['Close'].shift()).abs()
+    df['True_Range'] = df[['High_Low', 'High_Close', 'Low_Close']].max(axis=1)
+    df['ATR'] = df['True_Range'].rolling(window=14).mean()
+
+    # Stochastic Oscillator
+    low_14 = df['Low'].rolling(window=14).min()
+    high_14 = df['High'].rolling(window=14).max()
+    df['Stoch_K'] = 100 * ((df['Close'] - low_14) / (high_14 - low_14))
+    df['Stoch_D'] = df['Stoch_K'].rolling(window=3).mean()
+
+    # Additional indicators from ta library
+    try:
+        df['Williams_R'] = ta.momentum.williams_r(df['High'], df['Low'], df['Close'])
+        df['CCI'] = ta.trend.cci(df['High'], df['Low'], df['Close'])
+        df['OBV'] = ta.volume.on_balance_volume(df['Close'], df['Volume'])
+        df['CMF'] = ta.volume.chaikin_money_flow(df['High'], df['Low'], df['Close'], df['Volume'])
+        df['ROC'] = ta.momentum.roc(df['Close'], window=10)
+        df['TSI'] = ta.momentum.tsi(df['Close'])
+        df['UO'] = ta.momentum.ultimate_oscillator(df['High'], df['Low'], df['Close'])
+
+        ichimoku = ta.trend.IchimokuIndicator(df['High'], df['Low'])
+        df['Ichimoku_A'] = ichimoku.ichimoku_a()
+        df['Ichimoku_B'] = ichimoku.ichimoku_b()
+        df['Ichimoku_Base'] = ichimoku.ichimoku_base_line()
+        df['Ichimoku_Conversion'] = ichimoku.ichimoku_conversion_line()
+
+        df['PSAR'] = ta.trend.PSARIndicator(df['High'], df['Low'], df['Close']).psar()
+
+        keltner = ta.volatility.KeltnerChannel(df['High'], df['Low'], df['Close'])
+        df['Keltner_High'] = keltner.keltner_channel_hband()
+        df['Keltner_Low'] = keltner.keltner_channel_lband()
+
+        donchian = ta.volatility.DonchianChannel(df['High'], df['Low'], df['Close'])
+        df['Donchian_High'] = donchian.donchian_channel_hband()
+        df['Donchian_Low'] = donchian.donchian_channel_lband()
+
+        aroon = ta.trend.AroonIndicator(df['High'], df['Low'], df['Close'])
+        df['Aroon_Up'] = aroon.aroon_up()
+        df['Aroon_Down'] = aroon.aroon_down()
+
+        df['VWAP'] = ta.volume.volume_weighted_average_price(df['High'], df['Low'], df['Close'], df['Volume'])
+        df['AD'] = ta.volume.acc_dist_index(df['High'], df['Low'], df['Close'], df['Volume'])
+        df['Chaikin_Osc'] = ta.volume.chaikin_oscillator(df['High'], df['Low'], df['Close'], df['Volume'])
+        df['Force_Index'] = ta.volume.force_index(df['Close'], df['Volume'])
+        df['EOM'] = ta.volume.ease_of_movement(df['High'], df['Low'], df['Volume'])
+    except Exception as e:
+        LOG = logging.getLogger('ml')
+        LOG.debug("Error calculating some ta indicators: %s", e)
+
+    # Do not drop NaNs here; let callers decide. Return DataFrame with indicators appended.
     return df
 
 
