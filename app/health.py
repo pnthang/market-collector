@@ -89,3 +89,32 @@ def control_yahoo_stop():
 def control_yahoo_interval(payload: IntervalHours):
     ok = yahoo_scraper.set_scheduler_interval(payload.hours)
     return {"ok": ok}
+
+
+@app.post('/control/vn/snapshot')
+def control_vn_snapshot(force: bool = False):
+    """Trigger an immediate one-time snapshot from the running VN scraper.
+
+    If `force` is true, bypasses the market-hours check so snapshots can be
+    performed for testing outside market hours. Returns a simple OK/fail
+    payload.
+    """
+    # ensure scraper instance exists
+    inst = getattr(vn_scraper, "SCRAPER_INSTANCE", None)
+    if inst is None:
+        return {"ok": False, "reason": "scraper not running"}
+
+    # optionally bypass market-hours check for testing
+    if force:
+        from . import utils
+
+        orig = utils.is_market_open_at
+        try:
+            utils.is_market_open_at = lambda now, tz=None: True
+            inst._take_snapshot()
+        finally:
+            utils.is_market_open_at = orig
+    else:
+        inst._take_snapshot()
+
+    return {"ok": True}
