@@ -10,6 +10,17 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
+try:
+    import yfinance as yf
+    HAVE_YF = True
+except Exception:
+    HAVE_YF = False
+    yf = None
+
+try:
+    import pandas as pd
+except Exception:
+    pd = None
 
 from .playwright_manager import BrowserManager
 from .db import SessionLocal, init_db
@@ -56,6 +67,57 @@ def fetch_quotes(symbols: List[str]) -> List[Dict]:
     """Fetch current quote data via Yahoo public API for multiple symbols."""
     if not symbols:
         return []
+
+    # Prefer yfinance when available (more reliable for some tickers)
+    if HAVE_YF and pd is not None:
+        try:
+            # yfinance.download returns a DataFrame; for multiple tickers columns are a MultiIndex
+            df = yf.download(tickers=symbols, period='1d', interval='1m', group_by='ticker', threads=True, progress=False, show_errors=False)
+            results = []
+            # multiple tickers -> MultiIndex columns
+            if isinstance(df.columns, pd.MultiIndex):
+                for sym in symbols:
+                    try:
+                        if sym not in df.columns.levels[0]:
+                            continue
+                        sym_df = df[sym].dropna()
+                        if sym_df.empty:
+                            continue
+                        last = sym_df.iloc[-1]
+                        price = last.get('Close')
+                        ts = sym_df.index[-1]
+                        dt = ts.to_pydatetime() if hasattr(ts, 'to_pydatetime') else datetime.utcnow()
+                        results.append({
+                            'symbol': sym,
+                            'price': float(price) if price is not None else None,
+                            'change': None,
+                            'percent': None,
+                            'timestamp': dt,
+                        })
+                    except Exception:
+                        LOG.exception("Error parsing yfinance data for %s", sym)
+                        continue
+            else:
+                # single ticker
+                if not df.empty:
+                    last = df.iloc[-1]
+                    price = last.get('Close')
+                    ts = df.index[-1]
+                    dt = ts.to_pydatetime() if hasattr(ts, 'to_pydatetime') else datetime.utcnow()
+                    results.append({
+                        'symbol': symbols[0],
+                        'price': float(price) if price is not None else None,
+                        'change': None,
+                        'percent': None,
+                        'timestamp': dt,
+                    })
+            if results:
+                LOG.info("Fetched %d quotes via yfinance", len(results))
+                return results
+        except Exception:
+            LOG.exception("yfinance fetch failed, falling back to API")
+
+    # Fallback to HTTP quote API
     params = {"symbols": ",".join(symbols)}
     session = requests.Session()
     retries = Retry(total=3, backoff_factor=0.3, status_forcelist=(429, 500, 502, 503, 504))
