@@ -106,7 +106,14 @@ fi
 
 echo "Stopping and removing any existing compose stack (if present)"
 # best-effort stop/remove prior containers to ensure a clean start
-docker compose -f "${COMPOSE_FILE}" down --remove-orphans --volumes || true
+# Remove any containers/images that match the project prefix to avoid stale artifacts
+echo "Removing containers named 'market-collector*' (best-effort)"
+docker ps -a --filter "name=market-collector" -q | xargs -r docker rm -f || true
+echo "Removing local images matching 'market-collector*' (best-effort)"
+docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | awk '/market-collector/ {print $2}' | xargs -r docker rmi -f || true
+
+# Bring down any compose stack defined by the compose file (remove volumes/images/orphans)
+docker compose -f "${COMPOSE_FILE}" down --remove-orphans --volumes --rmi all || true
 
 echo "Starting compose stack using ${COMPOSE_FILE}"
 if [[ "${NO_BUILD}" -eq 1 ]]; then
