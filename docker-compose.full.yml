@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8000:8000"
+    command: uvicorn app.system.health:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./:/usr/src/app
+
+  worker:
+    build: .
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    command: celery -A app.queue.celery_app.celery worker --loglevel=info
+    volumes:
+      - ./:/usr/src/app
+
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-marketdb}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  init_db:
+    build: .
+    env_file: .env
+    depends_on:
+      - db
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "sleep 3 && python -c \"from app.db import init_db; init_db()\""
+    volumes:
+      - ./:/usr/src/app
+
+volumes:
+  pgdata:

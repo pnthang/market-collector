@@ -1,5 +1,79 @@
-"""Compatibility wrapper: re-export Yahoo scraper from `app.data_scraper`."""
-from .data_scraper.yahoo_scraper import *  # noqa: F401,F403
+"""Yahoo Finance scraper: discover indices, fetch quotes, news, and analysis.
+
+This module uses the public Yahoo JSON quote API for current quotes and
+Playwright to scrape the news and analysis pages when necessary.
+"""
+from typing import List, Dict, Optional
+import logging
+import time
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from bs4 import BeautifulSoup
+try:
+    import yfinance as yf
+    HAVE_YF = True
+except Exception:
+    HAVE_YF = False
+    yf = None
+
+try:
+    import pandas as pd
+except Exception:
+    pd = None
+
+from .playwright_manager import BrowserManager
+from ..db import SessionLocal, init_db
+from ..db.models import IndexMetadata, IndexPrice, IndexNews, IndexAnalysis, IndexTracking
+from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.events import EVENT_JOB_ERROR
+
+from ..config import MARKET_TZ
+from ..utils import is_market_open_at
+
+_YAHOO_SCHEDULER = None
+_YAHOO_PRICE_INTERVAL = 15
+# When True, force market hours checks to use US/Eastern regardless of MARKET_TZ
+FORCE_US_EASTERN = False
+
+def set_force_us_eastern(enabled: bool):
+    global FORCE_US_EASTERN
+    FORCE_US_EASTERN = bool(enabled)
+    LOG.info("Force US/Eastern market hours: %s", FORCE_US_EASTERN)
+    return FORCE_US_EASTERN
+
+LOG = logging.getLogger("yahoo_scraper")
+
+
+YAHOO_WORLD_INDICES = "https://finance.yahoo.com/world-indices/"
+YAHOO_QUOTE_API = "https://query1.finance.yahoo.com/v7/finance/quote"
+
+
+def discover_indices(limit: Optional[int] = None) -> List[str]:
+    """Scrape the world indices page and return a list of symbols (e.g., ^GSPC, ^DJI)."""
+    session = requests.Session()
+    retries = Retry(total=3, backoff_factor=0.5, status_forcelist=(429, 500, 502, 503, 504))
+    session.mount("https://", HTTPAdapter(max_retries=retries))
+    resp = session.get(YAHOO_WORLD_INDICES, timeout=15)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "html.parser")
+    symbols = []
+    for a in soup.select("a[href*='/quote/']"):
+        href = a.get('href')
+        if not href:
+            continue
+        parts = href.split('/quote/')
+        if len(parts) < 2:
+            continue
+        sym = parts[1].split('?')[0].strip('/')
+        if sym and sym not in symbols:
+            symbols.append(sym)
+            if limit and len(symbols) >= limit:
+                break
+    LOG.info("Discovered %d index symbols", len(symbols))
+    return symbols
+
 
 def fetch_quotes(symbols: List[str]) -> List[Dict]:
     """Fetch current quote data via Yahoo public API for multiple symbols."""
@@ -322,131 +396,3 @@ def _yahoo_price_job():
         LOG.info("Yahoo price job: fetched %d symbols", len(quotes))
     except Exception:
         LOG.exception("Yahoo price job failed")
-
-
-def start_scheduler(hours: int = 2, limit: Optional[int] = None, price_interval_seconds: int = 15):
-    global _YAHOO_SCHEDULER, _YAHOO_PRICE_INTERVAL
-    _YAHOO_PRICE_INTERVAL = int(price_interval_seconds)
-    if _YAHOO_SCHEDULER is None:
-        _YAHOO_SCHEDULER = BackgroundScheduler(timezone='UTC')
-        # analysis/news job every N hours
-        _YAHOO_SCHEDULER.add_job(lambda: _yahoo_job(limit), 'interval', hours=hours, id='yahoo_fetch')
-        # price job every price_interval_seconds (but each run checks market hours)
-        _YAHOO_SCHEDULER.add_job(_yahoo_price_job, 'interval', seconds=_YAHOO_PRICE_INTERVAL, id='yahoo_prices')
-        _YAHOO_SCHEDULER.add_listener(lambda ev: LOG.exception("Job error: %s", ev.exception) if ev.code == EVENT_JOB_ERROR else None)
-        _YAHOO_SCHEDULER.start()
-    return _YAHOO_SCHEDULER
-
-
-def stop_scheduler():
-    global _YAHOO_SCHEDULER
-    if _YAHOO_SCHEDULER is not None:
-        try:
-            _YAHOO_SCHEDULER.shutdown(wait=False)
-        except Exception:
-            LOG.debug("Yahoo scheduler shutdown failed")
-        _YAHOO_SCHEDULER = None
-
-
-def set_scheduler_interval(hours: int):
-    global _YAHOO_SCHEDULER
-    if _YAHOO_SCHEDULER is None:
-        return False
-    try:
-        try:
-            _YAHOO_SCHEDULER.remove_job('yahoo_fetch')
-        except Exception:
-            pass
-        _YAHOO_SCHEDULER.add_job(lambda: _yahoo_job(), 'interval', hours=hours, id='yahoo_fetch')
-        return True
-    except Exception:
-        LOG.exception("Failed to set yahoo scheduler interval")
-        return False
-
-
-def set_price_interval(seconds: int):
-    global _YAHOO_SCHEDULER, _YAHOO_PRICE_INTERVAL
-    if _YAHOO_SCHEDULER is None:
-        _YAHOO_PRICE_INTERVAL = int(seconds)
-        return False
-    try:
-        try:
-            _YAHOO_SCHEDULER.remove_job('yahoo_prices')
-        except Exception:
-            pass
-        _YAHOO_PRICE_INTERVAL = int(seconds)
-        _YAHOO_SCHEDULER.add_job(_yahoo_price_job, 'interval', seconds=_YAHOO_PRICE_INTERVAL, id='yahoo_prices')
-        return True
-    except Exception:
-        LOG.exception("Failed to set yahoo price interval")
-        return False
-
-
-def run_price_once():
-    """Trigger a one-time run of the price job (useful for API/manual runs)."""
-    try:
-        _yahoo_price_job()
-        return True
-    except Exception:
-        LOG.exception("run_price_once failed")
-        return False
-
-
-def save_news_analysis(symbol: str, payload: Dict[str, List[Dict]]):
-    session = SessionLocal()
-    try:
-        prefixed = f"US:{symbol}"
-        for n in payload.get('news', []):
-            if not n.get('url'):
-                continue
-            if session.query(IndexNews).filter_by(url=n['url']).one_or_none():
-                continue
-            session.add(IndexNews(index_code=prefixed, headline=n.get('headline'), url=n.get('url')))
-        for a in payload.get('analysis', []):
-            if not a.get('url'):
-                continue
-            if session.query(IndexAnalysis).filter_by(url=a['url']).one_or_none():
-                continue
-            session.add(IndexAnalysis(index_code=prefixed, title=a.get('title'), url=a.get('url')))
-        session.commit()
-    except Exception:
-        session.rollback()
-        LOG.exception("Error saving news/analysis for %s", symbol)
-    finally:
-        session.close()
-
-
-def run_one_cycle(limit: Optional[int] = None):
-    init_db()
-    # Prefer fetching symbols tracked by the user. If none tracked, fall back to discovery.
-    session = SessionLocal()
-    try:
-        tracked = session.query(IndexTracking).order_by(IndexTracking.created_at.desc()).all()
-        if tracked:
-            symbols = [t.symbol for t in tracked]
-        else:
-            symbols = discover_indices(limit=limit)
-    finally:
-        try:
-            session.close()
-        except Exception:
-            pass
-
-    if not symbols:
-        LOG.info("No symbols to fetch in this cycle")
-        return
-
-    quotes = fetch_quotes(symbols)
-    save_quotes(quotes)
-    for s in symbols:
-        try:
-            payload = scrape_news_and_analysis(s)
-            save_news_analysis(s, payload)
-            time.sleep(1)
-        except Exception:
-            LOG.exception("Error scraping %s", s)
-
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
-    run_one_cycle(limit=10)

@@ -10,12 +10,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt && playwright install chromium || true
+RUN pip install --no-cache-dir -r requirements.txt && python -m playwright install --with-deps chromium || true
 
 COPY . /app
 
-EXPOSE 8080
+EXPOSE 8000
 
-CMD ["python", "-m", "app"]
+CMD ["uvicorn", "app.system.health:app", "--host", "0.0.0.0", "--port", "8000"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s CMD curl -f http://localhost:8080/health || exit 1

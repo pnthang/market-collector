@@ -1,5 +1,21 @@
-"""Compatibility wrapper: re-export VN scraper from `app.data_scraper`."""
-from .data_scraper.vn_scraper import *  # noqa: F401,F403
+import json
+import logging
+from datetime import datetime
+from typing import Dict, Any
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.events import EVENT_JOB_ERROR
+from sqlalchemy.exc import IntegrityError
+import threading
+import signal
+
+from .playwright_manager import BrowserManager
+from ..db import SessionLocal, init_db
+from ..db.models import IndexPrice, IndexMetadata
+from ..config import SNAPSHOT_INTERVAL, MARKET_TZ, DRY_RUN
+from ..utils import is_market_open_at
+
+LOG = logging.getLogger("vn_scraper")
 
 
 def _find_messages(obj: Any):
@@ -104,7 +120,7 @@ class VNScraper:
 
         if DRY_RUN:
             for r in rows:
-                LOG.info("Dry-run insert: %s %s", r["index_code"], r["price"])
+                LOG.info("Dry-run insert: %s %s", r["index_code"], r["price"]) 
             return
 
         session = SessionLocal()

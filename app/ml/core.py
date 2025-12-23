@@ -1,5 +1,24 @@
-"""Compatibility wrapper: expose ML core from `app.ml.core`."""
-from .ml.core import *  # noqa: F401,F403
+import os
+import logging
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional
+
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import joblib
+import ta
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+
+from ..db import SessionLocal, init_db
+from ..db.models import IndexIndicator, IndexPrediction, IndexPrice, ModelMetadata
+from ..queue import celery
+
+LOG = logging.getLogger("ml")
+MODELS_DIR = os.getenv("ML_MODELS_DIR", "models")
+os.makedirs(MODELS_DIR, exist_ok=True)
 
 
 def get_stock_data(symbol: str, period: str = "1y") -> Optional[pd.DataFrame]:
