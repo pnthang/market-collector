@@ -228,7 +228,7 @@ def _tail_file(path: str, lines: int = 200) -> str:
 
 
 @app.get('/dashboard/logs')
-    def dashboard_logs(lines: int = 200):
+def dashboard_logs(lines: int = 200):
         # Try to read recent logs from DB first
         try:
             from .db import SessionLocal
@@ -254,5 +254,5 @@ def _tail_file(path: str, lines: int = 200) -> str:
             # DB unavailable or models not ready, fall back to file
             pass
 
-        txt = _tail_file(LOG_FILE, lines=lines)
-        return PlainTextResponse(content=txt)
+    txt = _tail_file(LOG_FILE, lines=lines)
+    return PlainTextResponse(content=txt)
