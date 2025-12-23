@@ -82,3 +82,12 @@ class LogEntry(Base):
     level = Column(String(32), index=True)
     logger = Column(String(255))
     message = Column(String(4096))
+
+
+
+class IndexTracking(Base):
+    __tablename__ = "index_tracking"
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(128), unique=True, nullable=False, index=True)
+    name = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

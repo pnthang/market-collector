@@ -21,6 +21,8 @@ import base64
 import tempfile
 import time
 from .playwright_manager import BrowserManager
+from .db import SessionLocal
+from .models import IndexTracking
 
 LOG = logging.getLogger("health")
 
@@ -220,6 +222,76 @@ def control_vn_cache():
     return JSONResponse(content={"ok": True, "cache": safe_cache})
 
 
+class TrackPayload(BaseModel):
+    symbol: str
+    name: str = None
+
+
+@app.get('/control/yahoo/track')
+def control_yahoo_track_list():
+    try:
+        session = SessionLocal()
+        rows = session.query(IndexTracking).order_by(IndexTracking.created_at.desc()).all()
+        out = [{"symbol": r.symbol, "name": r.name} for r in rows]
+        return JSONResponse(content={"ok": True, "tracked": out})
+    except Exception:
+        LOG.exception("Failed to list tracked symbols")
+        return JSONResponse(status_code=500, content={"ok": False})
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+@app.post('/control/yahoo/track')
+def control_yahoo_track_add(payload: TrackPayload):
+    sym = payload.symbol.strip()
+    if not sym:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        session = SessionLocal()
+        exists = session.query(IndexTracking).filter_by(symbol=sym).one_or_none()
+        if exists:
+            return JSONResponse(content={"ok": True, "message": "already tracked"})
+        row = IndexTracking(symbol=sym, name=payload.name)
+        session.add(row)
+        session.commit()
+        return JSONResponse(content={"ok": True})
+    except Exception:
+        LOG.exception("Failed to add tracked symbol %s", sym)
+        session.rollback()
+        return JSONResponse(status_code=500, content={"ok": False})
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+@app.delete('/control/yahoo/track')
+def control_yahoo_track_delete(symbol: str):
+    if not symbol:
+        return JSONResponse(status_code=400, content={"ok": False, "reason": "missing symbol"})
+    try:
+        session = SessionLocal()
+        row = session.query(IndexTracking).filter_by(symbol=symbol).one_or_none()
+        if not row:
+            return JSONResponse(content={"ok": True, "message": "not found"})
+        session.delete(row)
+        session.commit()
+        return JSONResponse(content={"ok": True})
+    except Exception:
+        LOG.exception("Failed to delete tracked symbol %s", symbol)
+        session.rollback()
+        return JSONResponse(status_code=500, content={"ok": False})
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 
 @app.get('/control/vn/inspect')
 def control_vn_inspect(headful: bool = False, wait: int = 3):
@@ -312,6 +384,14 @@ def dashboard():
                 <button onclick="loadLogs()">Refresh</button>
                 <pre id="logs" style="height:400px;overflow:auto;border:1px solid #ddd;padding:8px;background:#f9f9f9"></pre>
             </div>
+            <div style="margin-top:12px">
+                <h3>Tracked Symbols</h3>
+                <input id="track_symbol" placeholder="e.g. ^GSPC or AAPL" style="width:180px" />
+                <input id="track_name" placeholder="optional name" style="width:200px" />
+                <button onclick="addTrack()">Add</button>
+                <button onclick="loadTracked()">Refresh</button>
+                <ul id="tracked_list"></ul>
+            </div>
             <script>
                 function setInterval(){
                     const seconds = parseInt(document.getElementById('interval').value||'15',10);
@@ -323,6 +403,29 @@ def dashboard():
                 }
                 loadLogs();
                 setInterval(loadLogs, 15000);
+                function loadTracked(){
+                    fetch('/control/yahoo/track', {headers: { 'x-api-token': window._api_token || ''}})
+                        .then(r=>r.json()).then(j=>{
+                            const ul = document.getElementById('tracked_list'); ul.innerHTML='';
+                            if(j && j.tracked){
+                                j.tracked.forEach(s=>{
+                                    const li = document.createElement('li');
+                                    li.textContent = s.symbol + (s.name? (' - '+s.name):'');
+                                    const btn = document.createElement('button'); btn.textContent='Delete'; btn.style.marginLeft='8px';
+                                    btn.onclick = ()=>{ if(confirm('Delete '+s.symbol+'?')) fetch('/control/yahoo/track?symbol='+encodeURIComponent(s.symbol), {method:'DELETE', headers:{'x-api-token': window._api_token||''}}).then(()=>loadTracked()) };
+                                    li.appendChild(btn);
+                                    ul.appendChild(li);
+                                })
+                            }
+                        })
+                }
+                function addTrack(){
+                    const symbol = document.getElementById('track_symbol').value.trim();
+                    const name = document.getElementById('track_name').value.trim();
+                    if(!symbol) { alert('symbol required'); return }
+                    fetch('/control/yahoo/track', {method:'POST', headers:{'content-type':'application/json','x-api-token': window._api_token||''}, body:JSON.stringify({symbol,name})}).then(()=>{document.getElementById('track_symbol').value='';document.getElementById('track_name').value='';loadTracked()})
+                }
+                loadTracked();
             </script>
         </body>
         </html>
