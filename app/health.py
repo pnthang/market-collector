@@ -17,6 +17,10 @@ from .config import LOG_FILE
 import io
 import os
 from typing import List
+import base64
+import tempfile
+import time
+from .playwright_manager import BrowserManager
 
 LOG = logging.getLogger("health")
 
@@ -187,6 +191,70 @@ def control_vn_cache():
 
     safe_cache = {k: _make_safe(v) for k, v in inst.cache.items()} if getattr(inst, 'cache', None) else {}
     return JSONResponse(content={"ok": True, "cache": safe_cache})
+
+
+
+@app.get('/control/vn/inspect')
+def control_vn_inspect(headful: bool = False, wait: int = 3):
+    """Open a temporary Playwright page and return inspection data.
+
+    - `headful`: when true, enables images/resource loading.
+    - `wait`: additional seconds to wait after load for websocket activity.
+    """
+    bm = BrowserManager(disable_images=not headful)
+    try:
+        bm.start()
+        page = bm.new_page()
+        webs = []
+
+        def _on_ws(ws):
+            try:
+                webs.append(getattr(ws, 'url', str(ws)))
+            except Exception:
+                webs.append(str(ws))
+
+        page.on("websocket", _on_ws)
+        page.goto("https://iboard.ssi.com.vn/", timeout=60000)
+        try:
+            page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            # ignore load wait errors
+            pass
+        # allow some extra time for websockets to open
+        time.sleep(max(0, int(wait)))
+
+        title = page.title()
+        url = page.url
+        html_snippet = page.content()[:2000]
+        try:
+            screenshot_bytes = page.screenshot()
+            b64 = base64.b64encode(screenshot_bytes).decode('ascii')
+            tf = tempfile.NamedTemporaryFile(prefix="mc-inspect-", suffix=".png", delete=False)
+            tf.write(screenshot_bytes)
+            tf.flush()
+            tf.close()
+            screenshot_file = tf.name
+        except Exception:
+            screenshot_file = None
+            b64 = None
+
+        return JSONResponse(content={
+            "ok": True,
+            "title": title,
+            "url": url,
+            "websockets": webs,
+            "html_snippet": html_snippet,
+            "screenshot_file": screenshot_file,
+            "screenshot_base64": b64,
+        })
+    except Exception:
+        LOG.exception("Inspect failed")
+        return JSONResponse(status_code=500, content={"ok": False, "reason": "inspect failed"})
+    finally:
+        try:
+            bm.stop()
+        except Exception:
+            pass
 
 
 
