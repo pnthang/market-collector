@@ -31,7 +31,7 @@ services:
     environment:
       # Default initialization credentials — override via env or .env file as needed
       POSTGRES_USER: ${DB_USER:-marketuser}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-marketpass}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-market2026market2026}
       POSTGRES_DB: ${DB_NAME:-marketdb}
     # Ensure Postgres listens on all addresses so remote hosts can connect
     command: ["postgres", "-c", "listen_addresses='*'"]
